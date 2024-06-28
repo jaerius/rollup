@@ -17,23 +17,23 @@ const signer = provider.getSigner();
 // 스마트 계약 인스턴스 생성
 const contract = new ethers.Contract(contractAddress, contractABI, signer);
 
-interface UnsignedTransaction {
+interface UnsignedTransaction { // 트랜잭션 기본 구성 필드
     to: string;
     amount: bigint;
     fee: bigint;
     nonce: bigint;
     data: string;
-}
-
-interface Transaction extends UnsignedTransaction {
-    from: string;
-    hash: string;
     gasPrice: bigint;
     gasLimit: bigint;
     chainId: number;
 }
 
-interface SignedTransaction extends Transaction {
+interface Transaction extends UnsignedTransaction { // 트랜잭션 검증용 필드
+    from: string;
+    hash: string;
+}
+
+interface SignedTransaction extends Transaction { // 서명 이후 추가되는 필드
     v: number;
     r: string;
     s: string;
@@ -44,6 +44,7 @@ interface Batch {
     timestamp: number;
     calldata: string;
 }
+
 export interface BlockData {
     transactions: SignedTransaction[];
     stateRoot: string;
@@ -145,9 +146,7 @@ class POW {
         return { proposer, nonce, hash };
     }
 
- //   private createBlockHeader(block: Block, nonce: number): string {
- //       return `${block.previousBlockHash}${block.stateRoot}${block.blockNumber}${block.transactions}${block.timestamp}${nonce}${block.batchData}`;
- //   }
+
 
     private calculateHash(nonce: number): string {   
         const transactionsData = JSON.stringify(this.block.transactions.map(tx => ({
@@ -289,10 +288,16 @@ class OptimisticRollup {
         });
         const messageHash = ethers.utils.keccak256(serializedTx);
         const recoveredAddress = ethers.utils.recoverAddress(messageHash, sig);
+
+        // 메시지는 위조되지 않았나? 검증
+        if(tx.hash == messageHash) {
+            console.log("message is not forged");
+        }
     
-        console.log("Recovered address:", recoveredAddress);
+        console.log("Recovered address:", recoveredAddress); // 보낸 사람이 정말 서명한 사람인가? 검증
         console.log("Original from address:", tx.from);
     
+        // 서명자 일치 확인 및 메시지 위조 여부 모두 담은 결과 반환해야함
         return recoveredAddress.toLowerCase() === tx.from.toLowerCase();
     }
 
@@ -322,19 +327,19 @@ class OptimisticRollup {
         tx.hash = messageHash;
 
         // 서명된 트랜잭션과 서명 반환
-    const signedTx = await signer.signTransaction(txData);
-    const signature = ethers.utils.splitSignature(signedTx);
+        const signedTx = await signer.signTransaction(txData);
+        const signature = ethers.utils.splitSignature(signedTx);
 
-    const result: SignedTransaction = {
-        ...tx,
-        v: signature.v,
-        r: signature.r,
-        s: signature.s,
-        hash: messageHash,
-    };
+        const result: SignedTransaction = {
+            ...tx,
+            v: signature.v,
+            r: signature.r,
+            s: signature.s,
+            hash: messageHash,
+        };
 
-    return { signedTx: result, sig: signature };
-    }
+        return { signedTx: result, sig: signature };
+        }
 
     // 배치 관련 함수
 
@@ -488,6 +493,18 @@ class OptimisticRollup {
 
         const merkleTree = this.buildMerkleTree(leaves);
         console.log("merkleTree", merkleTree)
+        return merkleTree[merkleTree.length - 1][0];
+    }
+
+    private computeTransactionRoot(transactions: SignedTransaction[]): string { // transactionRoot 수정 후 블록에 추가 할 것
+        const leaves = transactions.map(tx => ethers.utils.keccak256(
+            ethers.utils.defaultAbiCoder.encode(
+                ['address', 'address', 'uint256', 'uint256', 'uint8', 'bytes32', 'bytes32'],
+                [tx.from, tx.to, tx.amount, tx.nonce, tx.v, tx.r, tx.s]
+            )
+        ));
+
+        const merkleTree = this.buildMerkleTree(leaves);
         return merkleTree[merkleTree.length - 1][0];
     }
 
