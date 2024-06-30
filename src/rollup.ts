@@ -412,6 +412,7 @@ class OptimisticRollup {
         // 배치를 L1에 제출합니다.
         await this.submitBatch(batchData, stateRoot);
         //batchId, state root, proposer, batchdata 모두 들어있음 txdata에
+        // compressed calldata
 
         // 대기 중인 트랜잭션 초기화
         this.pendingTransactions = [];
@@ -467,21 +468,21 @@ class OptimisticRollup {
                 throw new Error("L1 Contract requires a signer");
             }
     
-            const encodedCalldata = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(batch.calldata));
+            const hexlifiedCalldata = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(batch.calldata));
            
     
             // 가스 추정을 사용하여 가스 한도 설정
-            const gasEstimate = await this.l1Contract.estimateGas.appendStateBatch(encodedCalldata, stateRoot, batch.proposer, batch.batchId);
+            const gasEstimate = await this.l1Contract.estimateGas.appendStateBatch(hexlifiedCalldata, stateRoot, batch.proposer, batch.batchId);
             
             // 트랜잭션 생성 및 전송
-            const tx = await this.l1Contract.appendStateBatch(encodedCalldata, stateRoot, batch.proposer, batch.batchId, {
+            const tx = await this.l1Contract.appendStateBatch(hexlifiedCalldata, stateRoot, batch.proposer, batch.batchId, {
                 gasLimit: gasEstimate
             });
             await tx.wait();
             console.log(`Batch submitted with state root: ${stateRoot}`);
     
             this.l1Contract.on('StateBatchAppended', (batchIndex, calldata, stateRoot, proposer, batchId) => {
-                console.log(`StateBatchAppended event detected: batchIndex = ${batchIndex}, stateRoot = ${stateRoot}, proposer = ${proposer}, batchId = ${batchId}`);
+                console.log(`StateBatchAppended event detected: batchIndex = ${batchIndex}, calldata = ${calldata} stateRoot = ${stateRoot}, proposer = ${proposer}, batchId = ${batchId}`);
             });
     
         } catch (error) {
