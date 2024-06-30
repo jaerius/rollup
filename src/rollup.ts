@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { sha256,  toUtf8Bytes } from 'ethers/lib/utils';
 import * as zlib from 'zlib';
 import fs from 'fs';
+import path from 'path';
 // import { Blockchain } from './class';
 //import { POW } from './pow';
 
@@ -9,7 +10,7 @@ const abiPath = './build/contracts/StateCommitmentChain.json';
 
 const contractJson = JSON.parse(require('fs').readFileSync(abiPath, 'utf8'));
 const contractABI = contractJson.abi;
-const contractAddress = contractJson.networks['1719649930968'].address;
+const contractAddress = contractJson.networks['1719757626207'].address;
 console.log(contractAddress)
 //"0x1D7271C99C34Cf103f693ff4D0Db3B9661cBc1e2"
 const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545');
@@ -481,8 +482,35 @@ class OptimisticRollup {
             await tx.wait();
             console.log(`Batch submitted with state root: ${stateRoot}`);
     
-            this.l1Contract.on('StateBatchAppended', (batchIndex, calldata, stateRoot, proposer, batchId) => {
-                console.log(`StateBatchAppended event detected: batchIndex = ${batchIndex}, calldata = ${calldata} stateRoot = ${stateRoot}, proposer = ${proposer}, batchId = ${batchId}`);
+            this.l1Contract.on('StateBatchAppended', (batchId, calldata, stateRoot, proposer) => {
+                console.log(`StateBatchAppended event detected: batchId = ${batchId}, calldata = ${calldata} stateRoot = ${stateRoot}, proposer = ${proposer}}`);
+                const eventData = {
+                    batchId,
+                    calldata,
+                    stateRoot,
+                    proposer
+                };
+                
+                const filePath = path.join(__dirname, 'eventData.json');
+                
+                // 기존 데이터 읽기
+                let existingData = [];
+                if (fs.existsSync(filePath)) {
+                    const fileContent = fs.readFileSync(filePath, 'utf8');
+                    if (fileContent.trim()) {
+                        try {
+                            existingData = JSON.parse(fileContent);
+                        } catch (error) {
+                            console.error('Error parsing JSON:', error);
+                        }
+                    }
+                }
+                
+                // 새 데이터 추가
+                existingData.push(eventData);
+                
+                // 파일에 저장
+                fs.writeFileSync(filePath, JSON.stringify(existingData, null, 2));
             });
     
         } catch (error) {

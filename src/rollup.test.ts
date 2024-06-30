@@ -3,10 +3,10 @@ import { OptimisticRollup, Transaction, SignedTransaction } from './rollup';
 import { get } from 'http';
 
 const ganachePrivateKeys = {
-    '0x45c875B4268715e3DB18acD752453716e6646e59': '0x15761f1fd4a8516767438e928ac0a14ee066b927ad35730c13d94631e691afdf', // 여기에 실제 개인 키를 입력합니다.
-    '0x7f39A7695A752aB2831B6EEB5d6CfF915F377fA3': '0xb55f826288954d882113d9d75d18ee16153a5829c2d536d5a86fb900a75a8d8e',
-    '0xC94eFa528FD40B06BFCeFa37fB313FCe5bb5B450': '0x8269a225263305bec7e3694bf6d0c459c522dd99a201e8ba142808b90432ebc4',
-    '0x392056eeFBb5272626645f706b080e4C3a6D7fa1': '0x61c17067193c2f42886688cff9fadbb0c6b2c69abdd66a3879d30dd56993d221'
+    '0x6C75F6034EAb65DDdb4cc13FD5B9cd293bD2C1eC': '0x9930db877729f8e54cb805887a1a7a1fdf95b0a3133689d5a49d294508865364', // 여기에 실제 개인 키를 입력합니다.
+    '0x1D70EE4b22100f0c85dABA786b3540d52734d4eA': '0xbabe17096b33a8542dc4e55ca4e723c0869737315b9a2433a93e100c5a16f767',
+    '0x3F1a2B9eD794eEC30a0fb4C899A5d3F572109375': '0x794ced4becaefeb24a3df8f54bad62e95efe1d4d81ebc60674f2db8cab7b9a7f',
+    '0x9686B162A96aF8b71D08A228299fcb38ae3234f0': '0xe143987160f0f2f342df7547a0e2d98333162ec1186cf1fe6bba8268e7abc924'
 };
 
 const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545');
@@ -63,7 +63,7 @@ async function main() {
     console.log('설정을 시작합니다...');
     const difficulty = 1;
     const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545'); // 로컬 노드에 연결
-    const privateKey = '0x61c17067193c2f42886688cff9fadbb0c6b2c69abdd66a3879d30dd56993d221'; // 테스트용 개인 키
+    const privateKey = '0xbd0be890db0c9a48ef0f1b82539050cfd3a3d33eb35be3295cbdc707a435d3a8'; // 테스트용 개인 키
     console.log("getnetworkinfo",getNetworkInfo())
     const rollup = new OptimisticRollup(difficulty);
     const wallet = new ethers.Wallet(privateKey, provider);
@@ -78,8 +78,8 @@ async function main() {
     console.log('예제 트랜잭션 데이터를 준비합니다...');
     const transactions1: Transaction[] = [
         {
-            from: '0x45c875B4268715e3DB18acD752453716e6646e59',
-            to: '0x7f39A7695A752aB2831B6EEB5d6CfF915F377fA3',
+            from: '0x6C75F6034EAb65DDdb4cc13FD5B9cd293bD2C1eC',
+            to: '0x1D70EE4b22100f0c85dABA786b3540d52734d4eA',
             amount: BigInt(10),
             fee: BigInt(1),
             nonce: BigInt(0),
@@ -90,8 +90,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0x7f39A7695A752aB2831B6EEB5d6CfF915F377fA3',
-            to: '0xC94eFa528FD40B06BFCeFa37fB313FCe5bb5B450',
+            from: '0x1D70EE4b22100f0c85dABA786b3540d52734d4eA',
+            to: '0x3F1a2B9eD794eEC30a0fb4C899A5d3F572109375',
             amount: BigInt(20),
             fee: BigInt(1),
             nonce: BigInt(1),
@@ -105,8 +105,8 @@ async function main() {
 
     const transactions2: Transaction[] = [
         {
-            from: '0xC94eFa528FD40B06BFCeFa37fB313FCe5bb5B450',
-            to: '0x392056eeFBb5272626645f706b080e4C3a6D7fa1',
+            from: '0x3F1a2B9eD794eEC30a0fb4C899A5d3F572109375',
+            to: '0x9686B162A96aF8b71D08A228299fcb38ae3234f0',
             amount: BigInt(5),
             fee: BigInt(1),
             nonce: BigInt(2),
@@ -117,8 +117,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0x392056eeFBb5272626645f706b080e4C3a6D7fa1',
-            to: '0x45c875B4268715e3DB18acD752453716e6646e59',
+            from: '0x9686B162A96aF8b71D08A228299fcb38ae3234f0',
+            to: '0x6C75F6034EAb65DDdb4cc13FD5B9cd293bD2C1eC',
             amount: BigInt(15),
             fee: BigInt(1),
             nonce: BigInt(3),
@@ -132,8 +132,8 @@ async function main() {
 
     const transactions3: Transaction[] = [
         {
-            from: '0x45c875B4268715e3DB18acD752453716e6646e59',
-            to: '0xC94eFa528FD40B06BFCeFa37fB313FCe5bb5B450',
+            from: '0x6C75F6034EAb65DDdb4cc13FD5B9cd293bD2C1eC',
+            to: '0x3F1a2B9eD794eEC30a0fb4C899A5d3F572109375',
             amount: BigInt(3),
             fee: BigInt(1),
             nonce: BigInt(4),
@@ -144,8 +144,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0x45c875B4268715e3DB18acD752453716e6646e59',
-            to: '0x392056eeFBb5272626645f706b080e4C3a6D7fa1',
+            from: '0x6C75F6034EAb65DDdb4cc13FD5B9cd293bD2C1eC',
+            to: '0x9686B162A96aF8b71D08A228299fcb38ae3234f0',
             amount: BigInt(10),
             fee: BigInt(1),
             nonce: BigInt(5),
