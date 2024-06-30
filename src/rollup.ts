@@ -8,7 +8,8 @@ const abiPath = './build/contracts/StateCommitmentChain.json';
 
 const contractJson = JSON.parse(require('fs').readFileSync(abiPath, 'utf8'));
 const contractABI = contractJson.abi;
-const contractAddress = contractJson.networks['1719350466004'].address;
+const contractAddress = contractJson.networks['1719649930968'].address;
+console.log(contractAddress)
 //"0x1D7271C99C34Cf103f693ff4D0Db3B9661cBc1e2"
 const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545');
 // 서명자 설정
@@ -43,6 +44,7 @@ interface Batch {
     proposer: string;
     timestamp: number;
     calldata: string;
+    batchId: string;
 }
 
 export interface BlockData {
@@ -187,7 +189,7 @@ class OptimisticRollup {
     private currentBlockNumber: bigint = BigInt(0);
     private pow: POW;
     private chain: Blockchain;
-   
+    
 
     // 구현 할 것
     // tx with sig -> mempool(x) -> tx수집 및 verify -> L2 stateroot 변경 -> 블록 생성 -> L2에서는 상태 변화 끝
@@ -223,6 +225,16 @@ class OptimisticRollup {
         this.chain.addBlock(genesisBlock);
         this.currentBlockNumber = BigInt(1);
         const previousBlockHash = genesisBlock.blockHash;
+        
+    }
+    async setChallengePeriod(period: number) {
+        try {
+            const tx = await this.l1Contract.setChallengePeriod(period);
+            await tx.wait();
+            console.log('Challenge period set successfully');
+        } catch (error) {
+            console.error('Error setting challenge period:', error);
+        }
     }
 
     async addTransaction(tx: Transaction, signer: ethers.Signer): Promise<void> {
@@ -381,8 +393,8 @@ class OptimisticRollup {
 
         // 배치 데이터를 직렬화합니다.
         console.log("bestResult", bestResult)
-
-        const batchData: Batch = { proposer: bestResult.proposer, timestamp, calldata };
+        const batchId = ethers.utils.keccak256(ethers.utils.randomBytes(32));
+        const batchData: Batch = { proposer: bestResult.proposer, timestamp, calldata, batchId };
         console.log("batchData", batchData)
         
         // 블록 해시 계산
@@ -395,7 +407,8 @@ class OptimisticRollup {
        
         console.log("newBlock before submit", newBlock)
         // 배치를 L1에 제출합니다.
-        await this.submitBatch(batchData);
+        await this.submitBatch(batchData, stateRoot);
+        //batchId, state root, proposer, batchdata 모두 들어있음 txdata에
 
         // 대기 중인 트랜잭션 초기화
         this.pendingTransactions = [];
@@ -432,28 +445,35 @@ class OptimisticRollup {
         }
     }
     
-    private async submitBatch(batch: Batch): Promise<void> {
+    private async submitBatch(batch: Batch, stateRoot: string): Promise<void> {
         try {
             const signer = this.l1Contract.signer;
-        if (!signer) {
-            throw new Error("L1 Contract requires a signer");
-        }
-
-        const calldataBytes = ethers.utils.arrayify(batch.calldata);
-        const calldataArray = [];
-        for (let i = 0; i < calldataBytes.length; i += 32) {
-            const chunk = calldataBytes.slice(i, i + 32);
-            calldataArray.push(ethers.utils.hexZeroPad(ethers.utils.hexlify(chunk), 32));
-        }
-
-       
-        const tx = await this.l1Contract.submitBatch(calldataArray, batch.proposer);
-       // const tx = await this.l1Contract.submitBatch(batch.calldata /*, ethers.utils.hexlify(batch.timestamp)*/);
-        await tx.wait();
-        console.log(`Batch submitted with state root: ${batch.calldata}`);
-
+            if (!signer) {
+                throw new Error("L1 Contract requires a signer");
+            }
+    
+            const encodedCalldata = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(batch.calldata));
+           
+    
+            // 가스 추정을 사용하여 가스 한도 설정
+            const gasEstimate = await this.l1Contract.estimateGas.appendStateBatch(encodedCalldata, stateRoot, batch.proposer, batch.batchId);
+            
+            // 트랜잭션 생성 및 전송
+            const tx = await this.l1Contract.appendStateBatch(encodedCalldata, stateRoot, batch.proposer, batch.batchId, {
+                gasLimit: gasEstimate
+            });
+            await tx.wait();
+            console.log(`Batch submitted with state root: ${stateRoot}`);
+    
+            this.l1Contract.on('StateBatchAppended', (batchIndex, calldata, stateRoot, proposer, batchId) => {
+                console.log(`StateBatchAppended event detected: batchIndex = ${batchIndex}, stateRoot = ${stateRoot}, proposer = ${proposer}, batchId = ${batchId}`);
+            });
+    
         } catch (error) {
             console.error('Error submitting batch:', error);
+            if (error.data && error.data.message) {
+                console.error('Revert reason:', error.data.message);
+            }
             // 재시도 로직 추가 가능
         }
     }

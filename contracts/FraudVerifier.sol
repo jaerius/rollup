@@ -58,7 +58,7 @@ contract FraudVerifier {
         // 챌린저가 보증금을 예치했는지 확인
         require(bondManager.bonds(msg.sender) > 0, "No bond deposited");
         // 상태 배치 정보를 가져옴
-        (bytes32 stateRoot, uint256 timestamp, bool finalized, address proposer) = stateCommitmentChain.batches(_batchIndex);        // 배치가 최종화되지 않았는지 확인
+        (bytes memory batchData, bytes32 stateRoot, uint256 timestamp, bool finalized, address proposer, bytes32 batchId) = stateCommitmentChain.getBatch(_batchIndex);
         require(!finalized, "Batch already finalized");
         // 챌린지가 이미 해결되지 않았는지 확인
         
@@ -69,7 +69,7 @@ contract FraudVerifier {
             challenger: msg.sender,
             timestamp: block.timestamp,
             resolved: false,
-            challengedTxHash: _txHash
+            challengedTxHash: bytes32(uint256(_txHash))
         });
 
         // 챌린지 시작 이벤트 발생
@@ -154,13 +154,16 @@ contract FraudVerifier {
         require(!challenge.resolved, "Challenge already resolved");
         require(block.timestamp >= challenge.timestamp + stateCommitmentChain.challengePeriod(), "Challenge period not over");
 
+        (bytes memory batchData, bytes32 stateRoot, uint256 timestamp, bool finalized, address proposer, bytes32 batchId) = stateCommitmentChain.getBatch(_batchIndex);
+        require(!finalized, "Batch already finalized");
+
         //상태 전이 검증
         bool success = verifyStateTransition(_preStateRoot, _postStateRoot, _transaction) && verifyTransaction(_batchIndex, _transaction);
 
         // 챌린지 해결로 표시
         challenge.resolved = true;
 
-        ( , , , address proposer) = stateCommitmentChain.batches(_batchIndex);
+        //( , , , address proposer) = stateCommitmentChain.batches(_batchIndex);
 
         if (success) {
             // 상태 배치 최종화 및 보증금 반환

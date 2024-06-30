@@ -1,13 +1,15 @@
 import { ethers } from 'ethers';
 import { OptimisticRollup, Transaction, SignedTransaction } from './rollup';
+import { get } from 'http';
 
 const ganachePrivateKeys = {
-    '0x6BF0a403c4e94392613250dbcec9465624b2E28E': '0x8b1b6a47904ef1471f71a187d29354461cb08767024f5924e31a4b0e398c2eed', // 여기에 실제 개인 키를 입력합니다.
-    '0x7F0653Bf9cCbd88ef2e304C70cf865697094fd97': '0x16c5c92beb530264c90944fc57989f68772d074d18524817f06214f2a6e2bb79',
-    '0x2Eb475f013135813D051Fe2E3C781FB565766634': '0x7a4c7917c75a3a31ab7cfb7ef43bf7137b95c4469ae45dce20a7486389600675',
-    '0x53a5F8D3846bF3a1072bdE70f3A4566C268a4423': '0x447da867c01ac32e340646232567ab480cf93add98f9572c1e179f088842e192'
+    '0x45c875B4268715e3DB18acD752453716e6646e59': '0x15761f1fd4a8516767438e928ac0a14ee066b927ad35730c13d94631e691afdf', // 여기에 실제 개인 키를 입력합니다.
+    '0x7f39A7695A752aB2831B6EEB5d6CfF915F377fA3': '0xb55f826288954d882113d9d75d18ee16153a5829c2d536d5a86fb900a75a8d8e',
+    '0xC94eFa528FD40B06BFCeFa37fB313FCe5bb5B450': '0x8269a225263305bec7e3694bf6d0c459c522dd99a201e8ba142808b90432ebc4',
+    '0x392056eeFBb5272626645f706b080e4C3a6D7fa1': '0x61c17067193c2f42886688cff9fadbb0c6b2c69abdd66a3879d30dd56993d221'
 };
 
+const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545');
 
 // 서명된 트랜잭션을 생성하는 함수
 async function createSignedTransaction(tx: Transaction, signer: ethers.Signer): Promise<{ signedTx: SignedTransaction; sig: any }> {
@@ -44,6 +46,16 @@ async function signAndVerify(tx: Transaction, provider: ethers.providers.Provide
 // async function createHash(tx: Transaction, sig: any): Promise<{ signedTx: SignedTransaction; sig: any }> {
 //     return await createHash(tx, sig);
 // }
+async function getNetworkInfo() {
+    try {
+      const network = await provider.getNetwork();
+      console.log('Network ID:', network.chainId);
+      console.log('Network Name:', network.name);
+    } catch (error) {
+      console.error('Error fetching network info:', error);
+    }
+  }
+  
 
 async function main() {
     
@@ -51,12 +63,12 @@ async function main() {
     console.log('설정을 시작합니다...');
     const difficulty = 1;
     const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545'); // 로컬 노드에 연결
-    const privateKey = '0xfa66f4e5075b1d181bb7bc7c327e117bb072d7e5f486f4cebe258cdd7b765dd9'; // 테스트용 개인 키
-    
+    const privateKey = '0x61c17067193c2f42886688cff9fadbb0c6b2c69abdd66a3879d30dd56993d221'; // 테스트용 개인 키
+    console.log("getnetworkinfo",getNetworkInfo())
     const rollup = new OptimisticRollup(difficulty);
     const wallet = new ethers.Wallet(privateKey, provider);
     rollup.l1Contract = rollup.l1Contract.connect(wallet);
-
+    console.log("getnetworkinfo",getNetworkInfo())
     const ganacheAccounts = await provider.listAccounts();
     for (const account of ganacheAccounts) {
         const balance = await provider.getBalance(account);
@@ -66,8 +78,8 @@ async function main() {
     console.log('예제 트랜잭션 데이터를 준비합니다...');
     const transactions1: Transaction[] = [
         {
-            from: '0x6BF0a403c4e94392613250dbcec9465624b2E28E',
-            to: '0x7F0653Bf9cCbd88ef2e304C70cf865697094fd97',
+            from: '0x45c875B4268715e3DB18acD752453716e6646e59',
+            to: '0x7f39A7695A752aB2831B6EEB5d6CfF915F377fA3',
             amount: BigInt(10),
             fee: BigInt(1),
             nonce: BigInt(0),
@@ -78,8 +90,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0x7F0653Bf9cCbd88ef2e304C70cf865697094fd97',
-            to: '0x2Eb475f013135813D051Fe2E3C781FB565766634',
+            from: '0x7f39A7695A752aB2831B6EEB5d6CfF915F377fA3',
+            to: '0xC94eFa528FD40B06BFCeFa37fB313FCe5bb5B450',
             amount: BigInt(20),
             fee: BigInt(1),
             nonce: BigInt(1),
@@ -93,8 +105,8 @@ async function main() {
 
     const transactions2: Transaction[] = [
         {
-            from: '0x2Eb475f013135813D051Fe2E3C781FB565766634',
-            to: '0x53a5F8D3846bF3a1072bdE70f3A4566C268a4423',
+            from: '0xC94eFa528FD40B06BFCeFa37fB313FCe5bb5B450',
+            to: '0x392056eeFBb5272626645f706b080e4C3a6D7fa1',
             amount: BigInt(5),
             fee: BigInt(1),
             nonce: BigInt(2),
@@ -105,8 +117,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0x53a5F8D3846bF3a1072bdE70f3A4566C268a4423',
-            to: '0x6BF0a403c4e94392613250dbcec9465624b2E28E',
+            from: '0x392056eeFBb5272626645f706b080e4C3a6D7fa1',
+            to: '0x45c875B4268715e3DB18acD752453716e6646e59',
             amount: BigInt(15),
             fee: BigInt(1),
             nonce: BigInt(3),
@@ -120,8 +132,8 @@ async function main() {
 
     const transactions3: Transaction[] = [
         {
-            from: '0x6BF0a403c4e94392613250dbcec9465624b2E28E',
-            to: '0x2Eb475f013135813D051Fe2E3C781FB565766634',
+            from: '0x45c875B4268715e3DB18acD752453716e6646e59',
+            to: '0xC94eFa528FD40B06BFCeFa37fB313FCe5bb5B450',
             amount: BigInt(3),
             fee: BigInt(1),
             nonce: BigInt(4),
@@ -132,8 +144,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0x6BF0a403c4e94392613250dbcec9465624b2E28E',
-            to: '0x53a5F8D3846bF3a1072bdE70f3A4566C268a4423',
+            from: '0x45c875B4268715e3DB18acD752453716e6646e59',
+            to: '0x392056eeFBb5272626645f706b080e4C3a6D7fa1',
             amount: BigInt(10),
             fee: BigInt(1),
             nonce: BigInt(5),
@@ -165,9 +177,9 @@ async function main() {
 
     console.log('Proposer 리스트를 준비합니다...');
     const proposers = [
-        '0xF041690D9cBE398d3D51F25C87902C1403AffE66',
-        '0xBE4D9c8C638B5f0864017d7F6A04b66c42953847',
-        '0x5988A46C633A2beA1a8104F8eaDa5b4629fc2e78'
+        '0x2a6129C6ab8f1d46Aee325CDdFbaB48736218b74',
+        '0xa99Fc058349173744e2b584B5BF0dCa22ABF0B7A',
+        '0x8730253a7A12516A4Bc128B2aAC5cBf4f8bBb50C'
     ];
 
     // 첫 번째 배치
