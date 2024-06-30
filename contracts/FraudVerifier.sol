@@ -81,7 +81,7 @@ contract FraudVerifier {
             bytes32 _preStateRoot,
             bytes32 _postStateRoot,
             bytes memory _transaction
-        ) public returns (bool) {
+        ) public pure returns (bool) {
             // 트랜잭션을 적용한 후의 상태 루트를 계산
             bytes32 computedPostStateRoot = keccak256(abi.encodePacked(_preStateRoot, _transaction));
             // 계산된 상태 루트가 전달된 상태 루트와 일치하는지 확인
