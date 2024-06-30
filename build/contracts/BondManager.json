@@ -3522,12 +3522,12 @@
     "1719649930968": {
       "events": {},
       "links": {},
-      "address": "0x3657C455e30330977d80079ab9efe4ceC765EA91",
-      "transactionHash": "0x2d61283e54cdcc8cc40c80713a1e2b92877b10eb906238266f3975254ff8d745"
+      "address": "0x93af2BFBa8296c5BA7c0BB58BA14a5cf4194554a",
+      "transactionHash": "0xa2550d9237b826c85fe4f82b7017467ba2a396aa0f1ba072b8ba4c5ed4293f75"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2024-06-30T09:21:39.319Z",
+  "updatedAt": "2024-06-30T09:49:15.896Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

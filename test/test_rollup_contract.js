@@ -5,8 +5,7 @@ const FraudVerifier = artifacts.require("FraudVerifier");
 
 contract("Rollup Contracts", accounts => {
   let stateCommitmentChain, bondManager, canonicalTransactionChain, fraudVerifier;
-  const [owner, user2] = accounts;
-  const user1 = '0x8730253a7A12516A4Bc128B2aAC5cBf4f8bBb50C';
+  const [owner, user1, user2, user3] = accounts;
 
   before(async () => {
     stateCommitmentChain = await StateCommitmentChain.deployed();
@@ -15,17 +14,33 @@ contract("Rollup Contracts", accounts => {
     fraudVerifier = await FraudVerifier.deployed();
   });
 
+  beforeEach(async () => {
+    // 모든 테스트 이전에 사용자 잔액을 초기화
+    const depositAmount = web3.utils.toWei("1", "ether");
+    
+    // Withdraw all bonds from previous tests
+    const users = [user1, user2, user3];
+    for (const user of users) {
+      let bond = await bondManager.bonds(user);
+      if (bond.toString() !== "0") {
+        await bondManager.withdraw(bond, { from: user });
+      }
+    }
+  });
+
   describe("BondManager", () => {
     it("should allow depositing and withdrawing bonds", async () => {
       const depositAmount = web3.utils.toWei("1", "ether");
       await bondManager.deposit({ from: user1, value: depositAmount });
       
       let bond = await bondManager.bonds(user1);
+      console.log(`Bond after deposit: ${bond.toString()}`);
       assert.equal(bond.toString(), depositAmount, "Bond not deposited correctly");
 
       await bondManager.withdraw(depositAmount, { from: user1 });
       
       bond = await bondManager.bonds(user1);
+      console.log(`Bond after withdrawal: ${bond.toString()}`);
       assert.equal(bond.toString(), "0", "Bond not withdrawn correctly");
     });
   });
@@ -95,44 +110,70 @@ contract("Rollup Contracts", accounts => {
     });
   });
 
-  describe("FraudVerifier", () => {
-    it("should allow initiating and resolving challenges", async () => {
-      const batchIndex = 0;
-      const txHash = web3.utils.keccak256("fraudulentTx");
+  describe("FraudVerifier", function () {
+    it("should allow initiating and resolving challenges for the last 3 batches", async function () {
+      this.timeout(30000); // 테스트 시간 제한을 30초로 늘림
 
+      const depositAmount = web3.utils.toWei("1", "ether");
+      await bondManager.deposit({ from: user2, value: depositAmount });
+
+      const batchCount = await stateCommitmentChain.getBatchCount();
       const preStateRoot = web3.utils.keccak256("preState");
       const postStateRoot = web3.utils.keccak256("postState");
       const transaction = web3.utils.randomHex(100);
 
-      const challengeState = await fraudVerifier.challenges(batchIndex);
+      for (let i = 0; i < 3; i++) {
+        const batchIndex = batchCount.toNumber() - 1 - i;
+        const txHash = web3.utils.keccak256(`fraudulentTx${i}`);
 
-      if (!challengeState.resolved) {
-        await fraudVerifier.resolveChallenge(batchIndex, preStateRoot, postStateRoot, transaction);
-        
-        const resolvedChallenge = await fraudVerifier.challenges(batchIndex);
-        assert.equal(resolvedChallenge.resolved, true, "Challenge not resolved");
-      } else {
-        console.log("Challenge already resolved, skipping resolution step");
+        const challengeState = await fraudVerifier.challenges(batchIndex);
+        console.log(`Initial challenge state for batch ${batchIndex}:`, challengeState);
+
+        if (!challengeState.resolved) {
+          // Ensure user2 has deposited bond before initiating each challenge
+          let bond = await bondManager.bonds(user2);
+          if (bond.toString() === "0") {
+            await bondManager.deposit({ from: user2, value: depositAmount });
+          }
+
+          await fraudVerifier.initiateChallenge(batchIndex, txHash, { from: user2 });
+
+          const challenge = await fraudVerifier.challenges(batchIndex);
+          assert.equal(challenge.challenger, user2, `Challenge for batch ${batchIndex} not initiated correctly`);
+
+          console.log(`Challenge state for batch ${batchIndex} after initiation:`, challenge);
+
+          // Increase time by 10 minutes and 1 second to pass the challenge period
+          await web3.currentProvider.send({
+            jsonrpc: '2.0',
+            method: 'evm_increaseTime',
+            params: [10 * 60 + 1],
+            id: new Date().getTime()
+          }, () => {});
+
+          await fraudVerifier.resolveChallenge(batchIndex, preStateRoot, postStateRoot, transaction);
+
+          const resolvedChallenge = await fraudVerifier.challenges(batchIndex);
+          assert.equal(resolvedChallenge.resolved, true, `Challenge for batch ${batchIndex} not resolved`);
+
+          console.log(`Resolved challenge state for batch ${batchIndex}:`, resolvedChallenge);
+
+          // Check if the challenger bond was burned
+          bond = await bondManager.bonds(user2);
+          console.log(`Bond for user2 after resolving challenge for batch ${batchIndex}:`, bond.toString());
+          assert.equal(bond.toString(), "0", "Bond not burned correctly after challenge resolution");
+
+          // Finalize the batch after the challenge period
+          await stateCommitmentChain.finalizeBatch(batchIndex);
+
+          // Check if the batch was finalized
+          const batch = await stateCommitmentChain.getBatch(batchIndex);
+          console.log(`Finalized state for batch ${batchIndex}:`, batch.finalized);
+          assert.equal(batch.finalized, true, `Batch ${batchIndex} not finalized correctly`);
+        } else {
+          console.log(`Challenge for batch ${batchIndex} already resolved, skipping resolution step`);
+        }
       }
-
-      await bondManager.deposit({ from: user2, value: web3.utils.toWei("1", "ether") });
-
-      await fraudVerifier.initiateChallenge(batchIndex, txHash, { from: user2 });
-
-      const challenge = await fraudVerifier.challenges(batchIndex);
-      assert.equal(challenge.challenger, user2, "Challenge not initiated correctly");
-
-      await web3.currentProvider.send({
-        jsonrpc: '2.0',
-        method: 'evm_increaseTime',
-        params: [7 * 24 * 60 * 60 + 1],
-        id: new Date().getTime()
-      }, () => {});
-
-      await fraudVerifier.resolveChallenge(batchIndex, preStateRoot, postStateRoot, transaction);
-
-      const resolvedChallenge = await fraudVerifier.challenges(batchIndex);
-      assert.equal(resolvedChallenge.resolved, true, "Challenge not resolved");
     });
   });
 });

@@ -12304,12 +12304,12 @@
     "1719649930968": {
       "events": {},
       "links": {},
-      "address": "0x332b31fa709851FBfE05cc8a8ccb4f98Ff8eF04C",
-      "transactionHash": "0x77904ddd8abbd8daa76ddbde8152d99335ff972cbae2682e693acd72e96839e7"
+      "address": "0x992b43A19B0db206D0595E7EBAaa4dDDFad631e2",
+      "transactionHash": "0x068d3a45d8906f063502fd2dcf511167f288d053231c7b5faa55adb3efc735a1"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2024-06-30T09:21:39.294Z",
+  "updatedAt": "2024-06-30T09:49:15.872Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

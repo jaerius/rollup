@@ -1808,12 +1808,12 @@
     "1719649930968": {
       "events": {},
       "links": {},
-      "address": "0x61fd4770e9259Fd01EE551B3a02194bd6a84d028",
-      "transactionHash": "0x88c5ba4563cc43657d1b7ce04d150ecb813569f64dee981708402419bc7aa3c0"
+      "address": "0x24f7eB05641D4a9dFB3746F11E89B93059C47b17",
+      "transactionHash": "0xccc71465e773be9724e4c7d66bdcd2391af04e6cd6348a3a005ced52bff6d758"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2024-06-30T09:21:39.277Z",
+  "updatedAt": "2024-06-30T09:49:15.855Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { sha256,  toUtf8Bytes } from 'ethers/lib/utils';
+import * as zlib from 'zlib';
 import fs from 'fs';
 // import { Blockchain } from './class';
 //import { POW } from './pow';
@@ -372,6 +373,8 @@ class OptimisticRollup {
         const timestamp = Date.now();
         const calldata = this.encodeBatchData(this.pendingTransactions);
 
+        const compressedCalldata = await this.gzipCompress(calldata);
+
         // 새로운 블록 생성
         const blockData: BlockData = {
             transactions: this.pendingTransactions,
@@ -381,7 +384,7 @@ class OptimisticRollup {
             timestamp,
             blockHash: '',
             nonce: BigInt(0),
-            batchData: calldata
+            batchData: compressedCalldata
         };
 
         const newBlock = new Block(blockData);
@@ -394,7 +397,7 @@ class OptimisticRollup {
         // 배치 데이터를 직렬화합니다.
         console.log("bestResult", bestResult)
         const batchId = ethers.utils.keccak256(ethers.utils.randomBytes(32));
-        const batchData: Batch = { proposer: bestResult.proposer, timestamp, calldata, batchId };
+        const batchData: Batch = { proposer: bestResult.proposer, timestamp, calldata: compressedCalldata, batchId };
         console.log("batchData", batchData)
         
         // 블록 해시 계산
@@ -412,6 +415,18 @@ class OptimisticRollup {
 
         // 대기 중인 트랜잭션 초기화
         this.pendingTransactions = [];
+    }
+
+    private async gzipCompress(data: string): Promise<string> {
+        return new Promise((resolve, reject) => {
+            zlib.gzip(data, (error, result) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(result.toString('base64'));
+                }
+            });
+        });
     }
     
     

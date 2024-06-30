@@ -22291,12 +22291,12 @@
     "1719649930968": {
       "events": {},
       "links": {},
-      "address": "0x65827fb7A08DB64F73837Bc54d49fae5493A7f15",
-      "transactionHash": "0x1c01ac4fa652f7f7353d2546e559790f8f291d96eac86415a19aaad9afa85059"
+      "address": "0x4294ec3c60Fcdf874A1D9D4df684cEf043045d2b",
+      "transactionHash": "0x90051631c70f43cc6c8e21a9cd0aaf3ce4aaf25c381d29ccf9b09858b55072fe"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2024-06-30T09:21:39.348Z",
+  "updatedAt": "2024-06-30T09:49:15.930Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",
