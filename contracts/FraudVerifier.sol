@@ -10,7 +10,7 @@ contract FraudVerifier {
     CanonicalTransactionChain public canonicalTransactionChain;
     BondManager public bondManager;
 
-    // Challenge 구조체 정의: 챌린저, 타임스탬프, 해결 여부를 포함
+    // Challenge 구조체 정의: 챌린저, 타임스탬프, 해결 여부, 트랜잭션 인덱스 포함(어떤 트랜잭션에 대한 챌린지인지 구분하기 위함)
     struct Challenge {
         address challenger;
         uint256 timestamp;
@@ -37,16 +37,16 @@ contract FraudVerifier {
     mapping(address => Account) public accounts;
 
     // 챌린지들을 저장하는 매핑
-    mapping(uint256 => Challenge) public challenges;
+    mapping(bytes32 => Challenge) public challenges;
 
     // 챌린지가 시작되었을 때 발생하는 이벤트
-    event ChallengeInitiated(uint256 indexed batchIndex, address indexed challenger, bytes32 _txHash);
+    event ChallengeInitiated(bytes32 indexed batchId, address indexed challenger, bytes32 _txHash);
     // 챌린지가 해결되었을 때 발생하는 이벤트
-    event ChallengeResolved(uint256 indexed batchIndex, bool success, address proposer);
+    event ChallengeResolved(bytes32 indexed batchId, bool success, address proposer);
 
     uint256 constant MIN_TRANSACTION_AMOUNT = 1 wei;
 
-    // 생성자, 다른 컨트랙트들의 주소를 인자로 받음
+    
     constructor(address _scc, address _ctc, address _bm) {
         stateCommitmentChain = StateCommitmentChain(_scc);
         canonicalTransactionChain = CanonicalTransactionChain(_ctc);
@@ -54,46 +54,46 @@ contract FraudVerifier {
     }
 
     // 챌린지를 시작하는 함수
-    function initiateChallenge(uint256 _batchIndex, bytes32 _txHash, bytes32[] memory _merkleProof) public {
+    function initiateChallenge(bytes32 _batchId, bytes32 _txHash, bytes32[] memory _merkleProof) public {
         // 챌린저가 보증금을 예치했는지 확인
         require(bondManager.bonds(msg.sender) > 0, "No bond deposited");
         // 상태 배치 정보를 가져옴
-        (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool vaild, address proposer, bytes32 batchId) = stateCommitmentChain.getBatch(_batchIndex);
+        (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool valid, address proposer, bytes32 batchId ,uint256 batchIndex) = stateCommitmentChain.getBatchByBatchId(_batchId);
         require(!finalized, "Batch already finalized");
         // 챌린지가 이미 해결되지 않았는지 확인
-        require(!challenges[_batchIndex].resolved, "Challenge already resolved");
+        require(!challenges[_batchId].resolved, "Challenge already resolved");
 
-        bytes32 transactionsRoot = stateCommitmentChain.getBatchTransactionsRoot(_batchIndex);
+        bytes32 transactionsRoot = stateCommitmentChain.getBatchTransactionsRoot(_batchId);
         require(verifyMerkleProof(_merkleProof, transactionsRoot, _txHash), "Invalid Merkle proof");
+        //verifier가 제출한 트랜잭션이 배치에 존재하는지 proof를 확인
 
         // 챌린지 정보 저장
-        challenges[_batchIndex] = Challenge({
+        challenges[_batchId] = Challenge({
             challenger: msg.sender,
             timestamp: block.timestamp,
             resolved: false,
-            challengedTxHash: bytes32(uint256(_txHash))
+            challengedTxHash: _txHash
         });
 
         // 챌린지 시작 이벤트 발생
-        emit ChallengeInitiated(_batchIndex, msg.sender, _txHash);
+        emit ChallengeInitiated(_batchId, msg.sender, _txHash);
     }
 
-       // 상태 전이를 검증하는 함수
-        function verifyStateTransition(
-            bytes32 _preStateRoot,
-            bytes32 _postStateRoot,
-            bytes memory _transaction
-        ) public pure returns (bool) {
-            // 트랜잭션을 적용한 후의 상태 루트를 계산
-            bytes32 computedPostStateRoot = keccak256(abi.encodePacked(_preStateRoot, _transaction));
-            // 계산된 상태 루트가 전달된 상태 루트와 일치하는지 확인
-            return computedPostStateRoot == _postStateRoot;
-        }
+    // 상태 전이를 검증하는 함수
+    function verifyStateTransition(
+        bytes32 _preStateRoot,
+        bytes32 _postStateRoot,
+        bytes memory _transaction
+    ) public pure returns (bool) {
+        // 트랜잭션을 적용한 후의 상태 루트를 계산
+        bytes32 computedPostStateRoot = keccak256(abi.encodePacked(_preStateRoot, _transaction));
+        // 계산된 상태 루트가 전달된 상태 루트와 일치하는지 확인
+        return computedPostStateRoot == _postStateRoot;
+    }
 
-  
-
-     function verifyTransaction(uint256 _batchIndex, bytes memory _transaction) public view returns (bool) {
-        Challenge storage challenge = challenges[_batchIndex];
+    // 트랜잭션을 검증하는 함수
+    function verifyTransaction(bytes32 _batchId, bytes memory _transaction) public view returns (bool) {
+        Challenge storage challenge = challenges[_batchId];
         require(!challenge.resolved, "Challenge already resolved");
 
         TransactionData memory txData = abi.decode(_transaction, (TransactionData));
@@ -109,21 +109,21 @@ contract FraudVerifier {
         ));
 
         if (txHash != challenge.challengedTxHash) {
-        return false;
+            return false;
         }
 
-       bytes32 messageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", txHash));
-       (uint8 v, bytes32 r, bytes32 s) = splitSignature(txData.signature);
-       address signer = ecrecover(messageHash, v, r, s);
+        bytes32 messageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", txHash));
+        (uint8 v, bytes32 r, bytes32 s) = splitSignature(txData.signature);
+        address signer = ecrecover(messageHash, v, r, s);
 
         // 2. 논스 검증
         if (txData.nonce != accounts[signer].nonce) {
-                return false;
-            }
+            return false;
+        }
         // 3. 잔액 검증
         uint256 totalCost = txData.value + (txData.gasLimit * txData.gasPrice);
         if (accounts[signer].balance < totalCost) {
-             return false;
+            return false;
         }
         // 4. 최소 트랜잭션 금액 검증
         if (txData.value < MIN_TRANSACTION_AMOUNT) return false;
@@ -138,7 +138,6 @@ contract FraudVerifier {
         if (txData.value + (txData.gasLimit * txData.gasPrice) < txData.value) return false;
 
         return true;
-        
     }
 
     function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
@@ -152,58 +151,57 @@ contract FraudVerifier {
     }
 
     // 챌린지를 해결하는 함수
-    function resolveChallenge(uint256 _batchIndex, bytes32 _preStateRoot, bytes32 _postStateRoot, bytes memory _transaction) public {
-        Challenge storage challenge = challenges[_batchIndex];
+    function resolveChallenge(bytes32 _batchId, bytes32 _preStateRoot, bytes32 _postStateRoot, bytes memory _transaction) public {
+        Challenge storage challenge = challenges[_batchId];
         require(!challenge.resolved, "Challenge already resolved");
         require(block.timestamp >= challenge.timestamp + stateCommitmentChain.challengePeriod(), "Challenge period not over");
-
-        (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool vaild, address proposer,) = stateCommitmentChain.getBatch(_batchIndex);
+    
+        (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool valid, address proposer, bytes32 batchId, uint256 batchIndex) = stateCommitmentChain.getBatchByBatchId(_batchId);
         require(!finalized, "Batch already finalized");
-
-        //상태 전이 검증
+    
+        // 상태 전이 검증
         bool success = 
             verifyStateTransition(_preStateRoot, _postStateRoot, _transaction) 
-            && verifyTransaction(_batchIndex, _transaction);
-
+            && verifyTransaction(_batchId, _transaction);
+    
         // 챌린지 해결로 표시
         challenge.resolved = true;
-
-        //( , , , address proposer) = stateCommitmentChain.batches(_batchIndex);
-
+    
         if (success) {
-            // 상태 배치 최종화 및 보증금 반환
-            stateCommitmentChain.finalizeBatch(_batchIndex);
+            // 상태 배치 최종화 및 보증금 반환, 챌린지가 성공하더라도 finalize는 기간이 지나야 하지만 일단 이렇게 구현
+            stateCommitmentChain.finalizeBatch(batchIndex);
             bondManager.withdraw(bondManager.bonds(challenge.challenger));
             bondManager.updateBond(proposer, 0); // 보증금 소각
         } else {
             // 보증금 소각
             bondManager.updateBond(challenge.challenger, 0);
         }
-
+    
         // 챌린지 해결 이벤트 발생
-        emit ChallengeResolved(_batchIndex, success, proposer);
+        emit ChallengeResolved(_batchId, success, proposer);
     }
 
-     function executeFullBatch(uint256 _batchIndex) internal returns (bytes32) {
-        (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool vaild, address proposer,) 
-        = stateCommitmentChain.getBatch(_batchIndex);       
-        uint256 txCount = canonicalTransactionChain.getBatchTransactionCount(_batchIndex);
+    // 배치 내의 모든 트랜잭션을 실행하는 함수, 챌린지가 들어왔을때 L1에서의 검증 용도
+    function executeFullBatch(bytes32 _batchId) internal returns (bytes32) {
+        (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool valid, address proposer, bytes32 batchId, uint256 batchIndex) 
+        = stateCommitmentChain.getBatchByBatchId(_batchId);       
+        uint256 txCount = canonicalTransactionChain.getBatchTransactionCount(batchIndex);
 
         bytes32 currentStateRoot = stateRoot;
 
         for (uint256 i = 0; i < txCount; i++) {
-            bytes memory txData = canonicalTransactionChain.getTransaction(_batchIndex, i);
+            bytes memory txData = canonicalTransactionChain.getTransaction(batchIndex, i);
             TransactionData memory tx = abi.decode(txData, (TransactionData));
             
             executeTransaction(tx);
 
-            
             currentStateRoot = keccak256(abi.encodePacked(currentStateRoot, txData));
         }
 
-        return stateRoot;
+        return currentStateRoot;
     }
 
+    // 트랜잭션을 실행하는 함수, 상태를 업데이트 한다
     function executeTransaction(TransactionData memory _tx) internal {
         // Simplified transaction execution logic
         require(_tx.value >= MIN_TRANSACTION_AMOUNT, "Transaction value too low");
@@ -221,6 +219,7 @@ contract FraudVerifier {
         sender.nonce++;
     }
 
+    // 머클 증명을 검증하는 함수
     function verifyMerkleProof(bytes32[] memory proof, bytes32 root, bytes32 leaf) internal pure returns (bool) {
         bytes32 computedHash = leaf;
         for (uint256 i = 0; i < proof.length; i++) {

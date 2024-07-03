@@ -13,9 +13,15 @@ import contract from './contracts/StateCommitmentChain';
 import FraudVerifierContract from './contracts/FraudVerifier';
 import BondManagerContract from './contracts/BondManager';
 import ctcContract from './contracts/CanonicalTransactionChain';
-import { RLP, keccak256, sha256,  toUtf8Bytes } from 'ethers/lib/utils';
+import { RLP, keccak256, serializeTransaction, sha256,  toUtf8Bytes } from 'ethers/lib/utils';
+import TransactionService from './services/TransactionService';
+import StateService from './services/StateService';
+
 
 class OptimisticRollup {
+    once(arg0: string, arg1: (batchIndex: any, batchData: any, stateRoot: any, transactionsRoot: any, proposer: any, appendedBatchId: any) => void) {
+        throw new Error('Method not implemented.');
+    }
     public pendingTransactions: SignedTransaction[] = [];
     private accounts: Map<string, { balance: bigint, nonce: bigint }> = new Map();
     public l1Contract: ethers.Contract;
@@ -28,6 +34,9 @@ class OptimisticRollup {
     private chain: Blockchain;
     public db: Level;
     public previousSnapshotKey: string = '';
+    private stateRoot: string;
+    private transactionService: TransactionService;
+    private stateService: StateService;
 
     constructor(difficulty: number) {
         this.l1Contract = contract;
@@ -53,16 +62,14 @@ class OptimisticRollup {
         this.chain.addBlock(genesisBlock);
         this.currentBlockNumber = BigInt(1);
         this.db = new Level('./db', { valueEncoding: 'json' });
+        this.stateRoot = ethers.constants.HashZero;
+        this.transactionService = new TransactionService();
+        this.stateService = new StateService(this.db);
         this.setupEventListeners();
         
     }
 
-    ///snap shot
-    async saveSnapshot(transactionIndex: string, snapshot: any): Promise<void> {
-        const key = `snapshot:${transactionIndex}`;
-        await this.db.put(key, snapshot);
-        console.log(`Saved snapshot at key: ${key}`);
-    }
+    // challenge, rollback 관련 함수들 작업 필요
 
     private setupEventListeners() {
         this.l1Contract.on('BatchInvalidated', async (batchIndex: number) => {
@@ -73,7 +80,7 @@ class OptimisticRollup {
     private async handleBatchInvalidation(invalidatedBatchIndex: number) {
         const latestValidBatch = await this.l1Contract.getLatestValidBatch();
         const transactionsToReapply = await this.getTransactionsAfterBatch(latestValidBatch);
-        this.revertToState(latestValidBatch);
+        await this.stateService.revertToState(latestValidBatch);
         for (const tx of transactionsToReapply) {
             await this.reapplyTransaction(tx);
         }
@@ -87,29 +94,47 @@ class OptimisticRollup {
         for (let i = batchIndex + 1; i < currentBatchCount; i++) {
             const batchData = await this.l1Contract.getBatch(i);
             if (batchData.valid) {
-                const decodedTransactions = this.decodeBatchData(batchData.batchData);
-                transactions.push(...await decodedTransactions);
+                const decodedTransactions = await this.transactionService.decodeBatchData(batchData.batchData);
+                transactions.push(...decodedTransactions);
             }
         }
 
         return transactions;
     }
 
-    private async revertToState(batchIndex: number) {
-        const snapshot = await this.getSnapshotAtBatch(batchIndex);
-        this.accounts = snapshot.accounts;
-        this.blocks[Number(this.currentBlockNumber)].stateRoot = snapshot.stateRoot;
-    }
-
-    private async reapplyTransaction(tx: SignedTransaction): Promise<void> {
-        const fromAccount = this.accounts.get(tx.from) || { balance: BigInt(0), nonce: BigInt(0) };
-        fromAccount.balance -= tx.amount;
-        fromAccount.nonce += BigInt(1);
-        this.accounts.set(tx.from, fromAccount);
-
-        const toAccount = this.accounts.get(tx.to) || { balance: BigInt(0), nonce: BigInt(0) };
-        toAccount.balance += tx.amount;
-        this.accounts.set(tx.to, toAccount);
+    private reapplyTransaction(tx: SignedTransaction) {
+        // 트랜잭션을 재적용하여 상태를 업데이트하는 로직 구현
+        const account = this.accounts.get(tx.from);
+        if (account) {
+            account.nonce += BigInt(1);
+            account.balance -= tx.amount + tx.fee;
+    
+            // 음수 값이 발생하지 않도록 처리
+            if (account.balance < 0) {
+                throw new Error(`Invalid balance for account ${tx.from}: ${account.balance}`);
+            }
+            if (account.nonce < 0) {
+                throw new Error(`Invalid nonce for account ${tx.from}: ${account.nonce}`);
+            }
+    
+            this.accounts.set(tx.from, account);
+        }
+    
+        const recipient = this.accounts.get(tx.to) || { balance: BigInt(0), nonce: BigInt(0) };
+        recipient.balance += tx.amount;
+    
+        // 음수 값이 발생하지 않도록 처리
+        if (recipient.balance < 0) {
+            throw new Error(`Invalid balance for account ${tx.to}: ${recipient.balance}`);
+        }
+        if (recipient.nonce < 0) {
+            throw new Error(`Invalid nonce for account ${tx.to}: ${recipient.nonce}`);
+        }
+    
+        this.accounts.set(tx.to, recipient);
+    
+        // 상태 루트를 업데이트
+        this.stateRoot = this.stateService.computeStateRoot();
     }
 
     private async getSnapshotAtBatch(batchIndex: number): Promise<any> {
@@ -131,137 +156,83 @@ class OptimisticRollup {
         };
     }
 
+    private setStateRoot(stateRoot: string) {
+        this.stateRoot = stateRoot;
+    }
+
     // verifier가 틀렸는지 안 틀렸는지 검증
     async verifyBatch(batchId: string): Promise<void> {
         console.log("verifyBatch batchId:", batchId); 
         const batch = await this.l1Contract.getBatchByBatchId(batchId);
         console.log("verifyBatch batch:", batch)
-        const transactions: SignedTransaction[] = await this.decodeBatchData(batch.batchData);
+        const transactions: SignedTransaction[] = await this.transactionService.decodeBatchData(batch.batchData);
         console.log("verifyBatch transactions:", transactions);
         // 배치 시작 시 초기 상태 루트 설정
-        let previousStateRoot = await this.l1Contract.getPreviousStateRoot(batchId);
-        console.log(previousStateRoot, "previousStateRoot")
+        let previousStateRoot;
+        try {
+            previousStateRoot = await this.l1Contract.getPreviousStateRoot(batchId);
+            console.log("Previous State Root:", previousStateRoot);
+        } catch (error) {
+            console.error("Error fetching Previous State Root:", error);
+            return;
+        }
+
+        this.setStateRoot(previousStateRoot);
         
         for (let i = 0; i < transactions.length; i++) {
             const tx = transactions[i];
+            console.log(`Processing transaction ${i}:`, tx);
 
-            // 트랜잭션 실행 후 상태 루트 계산 (시뮬레이션)
-            this.reapplyTransaction(tx);
-            const computedStateRoot = this.computeStateRoot();
-
-            // 예상 상태 루트와 비교
-            const expectedStateRoot = await this.db.get(`stateRoot:${tx.hash}`);
-            if (expectedStateRoot !== computedStateRoot) {
-                const leaves = transactions.map(tx => ethers.utils.keccak256(ethers.utils.toUtf8Bytes(JSON.stringify(tx))));
-                const merkleTree = MerkleTree.buildMerkleTree(leaves);
-                const root = merkleTree[merkleTree.length - 1][0];
-                const proof = MerkleTree.generateMerkleProof(merkleTree, i);
-                await this.challenge(batchId, tx.hash, proof);
+            try {
+                this.reapplyTransaction(tx);
+                const computedStateRoot = this.stateService.computeStateRoot();
+                console.log(`Computed State Root for transaction ${i}:`, computedStateRoot);
+        
+                // 예상 상태 루트와 비교
+                const expectedStateRoot = await this.db.get(`stateRoot:${tx.hash}`);
+                console.log(`Expected State Root for transaction ${i}:`, expectedStateRoot);
+        
+                if (expectedStateRoot !== computedStateRoot) {
+                    const leaves = transactions.map(tx => {
+                        console.log(`Transaction ${i} data for keccak256:`, tx);
+    
+                        const encodedTx = ethers.utils.RLP.encode([
+                            ethers.utils.hexlify(ethers.BigNumber.from(tx.nonce)),      // nonce
+                            ethers.utils.hexlify(ethers.BigNumber.from(tx.gasPrice)),   // gasPrice
+                            ethers.utils.hexlify(ethers.BigNumber.from(tx.gasLimit)),   // gasLimit
+                            tx.to,                                                     // to
+                            ethers.utils.hexlify(ethers.BigNumber.from(tx.amount)),      // value
+                            tx.data,                                                   // data
+                            ethers.utils.hexlify(tx.chainId),                           // chainId
+                            ethers.utils.hexlify(tx.v),                                 // v
+                            tx.r,                                                      // r
+                            tx.s                                                       // s
+                            ]);
+    
+                        return ethers.utils.keccak256(encodedTx);
+                    });
+                    const merkleTree = MerkleTree.buildMerkleTree(leaves);
+                    const root = merkleTree[merkleTree.length - 1][0];
+                    const proof = MerkleTree.generateMerkleProof(merkleTree, i);
+                    console.log(`Computed Merkle Root for transaction ${i}:`, root);
+                    await this.challenge(batchId, tx.hash, proof);
+                    return;
+                }
+        
+                previousStateRoot = computedStateRoot;
+            } catch (error) {
+                console.error(`Error processing transaction ${i}:`, error);
                 return;
             }
-
-            previousStateRoot = computedStateRoot;
         }
-
-        console.log('Batch verification successful');
-    }
+            console.log('Batch verification successful');
+     }
 
     async challenge(batchId: string, transactionIndex: string, proof: string[]): Promise<void> {
        
         console.log(`Challenging batch ${batchId}, transaction ${transactionIndex} due to ${proof}`);
-        await this.verifierContract.initiateChallenge(batchId, transactionIndex, proof);
-    }
-
-
-    private async decodeBatchData(compressedData: string): Promise<SignedTransaction[]> {
-       // Hex 디코딩
-       const hexDecodedData = ethers.utils.arrayify(compressedData);
-       console.log("Hex decoded data:", hexDecodedData);
-
-       // UTF-8 바이트 배열로 변환
-       const utf8Data = ethers.utils.toUtf8String(hexDecodedData);
-       console.log("UTF-8 data:", utf8Data);
-
-       // Base64 디코딩
-       const base64DecodedData = Buffer.from(utf8Data, 'base64');
-       console.log("Base64 decoded data:", base64DecodedData);
-
-        // const isGzip = (buffer: Buffer) => {
-        //     return buffer[0] === 0x1f && buffer[1] === 0x8b;
-        // };
-
-        // if (!isGzip(buffer)) {
-        //     throw new Error("Data is not in gzip format.");
-        // }
-        try {
-            const decompressedData = await new Promise<Buffer>((resolve, reject) => {
-                zlib.gunzip(base64DecodedData, (error, result) => {
-                    if (error) {
-                        console.error("Gunzip error:", error);
-                        reject(error);
-                    } else {
-                        console.log("gunzip result (Buffer):", result);
-                        resolve(result);
-                    }
-                });
-            });
-    
-            const rlpEncodedBatch = decompressedData.toString('utf-8');
-            console.log("RLP encoded batch:", rlpEncodedBatch);
-    
-            // 첫 번째 RLP 디코딩: 트랜잭션 목록 추출
-            const decodedBatch = ethers.utils.RLP.decode(rlpEncodedBatch);
-    
-            // 트랜잭션 목록에서 각각의 트랜잭션을 다시 디코딩
-            const transactions: SignedTransaction[] = (decodedBatch as string[]).map(this.decodeTransaction);
-    
-            return transactions;
-        } catch (err) {
-            console.error("Decompression error:", err);
-            throw err;
-        }
-    }
-
-    decodeTransaction(rlpEncodedTx: string): SignedTransaction {
-        const decoded = ethers.utils.RLP.decode(rlpEncodedTx);
-    
-        // 트랜잭션 객체 생성
-    const tx: SignedTransaction = {
-        from: decoded[0],
-        to: decoded[1],
-        amount: BigInt(ethers.BigNumber.from(decoded[2]).toString()),
-        nonce: BigInt(ethers.BigNumber.from(decoded[3]).toString()),
-        fee: BigInt(ethers.BigNumber.from(decoded[4]).toString()),
-        gasPrice: BigInt(ethers.BigNumber.from(decoded[5]).toString()),
-        gasLimit: BigInt(ethers.BigNumber.from(decoded[6]).toString()),
-        chainId: Number(ethers.BigNumber.from(decoded[7])),
-        v: Number(ethers.BigNumber.from(decoded[8])),
-        r: decoded[9],
-        s: decoded[10],
-        data: decoded[11],
-        hash: ''
-    };
-
-    // 서명 전 필드만 포함한 트랜잭션 데이터 객체
-    const txData = {
-        nonce: Number(tx.nonce),
-        gasPrice: ethers.utils.hexlify(tx.gasPrice),
-        gasLimit: ethers.utils.hexlify(tx.gasLimit),
-        to: tx.to,
-        value: ethers.utils.hexlify(tx.amount),
-        data: tx.data,
-        chainId: tx.chainId
-    };
-
-    // 트랜잭션 직렬화
-    const serializedTx = ethers.utils.serializeTransaction(txData);
-    console.log("Serialized transaction:", serializedTx);
-
-    // 트랜잭션 해시 계산
-    tx.hash = ethers.utils.keccak256(serializedTx);
-    console.log("Transaction hash:", tx.hash);
-
-    return tx;
+        await this.bondManagerContract.deposit({ value : ethers.utils.parseEther('1')}); // 보증금 예치
+        await this.verifierContract.initiateChallenge(batchId, transactionIndex, proof); // 챌린지 신청
     }
 
     async setChallengePeriod(period: number) {
@@ -274,118 +245,30 @@ class OptimisticRollup {
         }
     }
 
-    async addTransaction(tx: Transaction, signer: ethers.Signer): Promise<void> {
-        const signedTx = await this.signTransaction(tx, signer);
-        if (await this.verifyTransaction(signedTx.signedTx, signedTx.sig)) {
-            this.pendingTransactions.push(signedTx.signedTx);
-        } else {
-            throw new Error("Transaction verification failed");
-        }
-    }
 
-    public async signTransaction(tx: Transaction, signer: ethers.Signer): Promise<{ signedTx: SignedTransaction; sig: any }> {
-        const txData = {
-            nonce: Number(tx.nonce),
-            gasPrice: ethers.utils.hexlify(tx.gasPrice),
-            gasLimit: ethers.utils.hexlify(tx.gasLimit),
-            to: tx.to,
-            value: ethers.utils.hexlify(tx.amount),
-            data: tx.data,
-            chainId: tx.chainId || 1
-        };
-    
-        const signedTx = await signer.signTransaction(txData); //sign message말고, transactino으로 했더니 됨
-        const parsedTx = ethers.utils.parseTransaction(signedTx);
-
-        const messageHash = ethers.utils.keccak256(ethers.utils.serializeTransaction(txData));
-    
-        let v = parsedTx.v!;
-        if (v >= 37) {
-            v = v - (2 * txData.chainId + 8);  // Adjust v value for EIP-155
-        }
-
-        console.log('서명된 트랜잭션 데이터:', txData);
-
-        return {
-            signedTx: {
-                ...tx,
-                v: v,
-                r: parsedTx.r!,
-                s: parsedTx.s!,
-                hash: messageHash
-            },
-            sig: {
-                v: v,
-                r: parsedTx.r!,
-                s: parsedTx.s!
-            }
-        };
-    }
-
-    public async verifyTransaction(tx: SignedTransaction, sig: any): Promise<boolean> {
-        const txData  = {
-            nonce: Number(tx.nonce),
-            gasPrice: ethers.utils.hexlify(tx.gasPrice),
-            gasLimit: ethers.utils.hexlify(tx.gasLimit),
-            to: tx.to,
-            value: ethers.utils.hexlify(tx.amount),
-            data: tx.data,
-            chainId: tx.chainId || 1,
-        };
-    
-        const serializedTx = ethers.utils.serializeTransaction({
-            nonce: txData.nonce,
-            gasPrice: txData.gasPrice,
-            gasLimit: txData.gasLimit,
-            to: txData.to,
-            value: txData.value,
-            data: txData.data,
-            chainId: txData.chainId
-        });
-        const messageHash = ethers.utils.keccak256(serializedTx);
-
-        let v = sig.v;
-        if (v >= 37) {
-            v = v - (2 * txData.chainId + 8);  // Adjust v value for EIP-155
-        }
-
-        console.log("검증된 트랜잭션 데이터:", txData);
-
-        const recoveredAddress = ethers.utils.recoverAddress(messageHash, { v, r: sig.r, s: sig.s });
-
-        // 메시지는 위조되지 않았나? 검증
-        if(tx.hash == messageHash) {
-            console.log("message is not forged");
-        }
-    
-        console.log("Recovered address:", recoveredAddress); // 보낸 사람이 정말 서명한 사람인가? 검증
-        console.log("Original from address:", tx.from);
-    
-        // 서명자 일치 확인 및 메시지 위조 여부 모두 담은 결과 반환해야함
-        return recoveredAddress.toLowerCase() === tx.from.toLowerCase();
-    }
+    // 배치 관련 함수들
 
 
     async processBatch(proposers: string[]): Promise<string> {
-        
+        // 1. 트랜잭션 실행
         this.executePendingTransactions();
         console.log("execute transactions", this.pendingTransactions)
-
-        const stateRoot = this.computeStateRoot();
+        // 2. 상태 루트 계산 -> 이건 이제 배치의 상태 루트가 됨
+        const stateRoot = this.stateService.computeStateRoot();
         console.log("stateRoot", stateRoot)
-
+        // 트랜잭션 루트 생성
         const transactionRoot = this.computeTransactionRoot(this.pendingTransactions);
         console.log("transactionRoot", transactionRoot)
-
+         // 3. 배치 생성
         const previousBlockHash = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].blockHash : ethers.constants.HashZero;
         console.log('previousBlockHash before creating new block:', previousBlockHash);
         const timestamp = Date.now();
-        const calldata = this.encodeBatchData(this.pendingTransactions);
+        const calldata = this.transactionService.encodeBatchData(this.pendingTransactions);
         console.log("encoded calldata:", calldata);
 
         const compressedCalldata = await this.gzipCompress(calldata);
         console.log("compressedCalldata (Base64):", compressedCalldata);
-
+        // 새로운 블록 생성
         const blockData: BlockData = {
             transactions: this.pendingTransactions,
             stateRoot,
@@ -399,14 +282,14 @@ class OptimisticRollup {
 
         const newBlock = new Block(blockData);
         const miningPromises = proposers.map(proposer => this.pow.mine(newBlock, proposer));
-        
+        // 가장 논스 값이 적게 든 사용자가 proposer가 됨
         const firstResult = await Promise.all(miningPromises);
         const bestResult = firstResult.reduce((prev, current) => prev.nonce < current.nonce ? prev : current);
         console.log("bestResult", bestResult)
-
+        // 배치 데이터를 직렬화
         const batchId = ethers.utils.keccak256(ethers.utils.randomBytes(32));
         const batchData = { proposer: bestResult.proposer, timestamp, calldata: compressedCalldata, batchId };
-        
+        // db에 스냅샷 찍음
         const snapshotKey = `snapshot:${batchId}`;
         await this.db.put(snapshotKey, JSON.stringify({
             timestamp,
@@ -416,7 +299,7 @@ class OptimisticRollup {
         }));
         this.previousSnapshotKey = snapshotKey;
         console.log("batchData", batchData)
-
+        // 블록 관련 연산 및 연결
         newBlock.blockHash = this.computeBlockHash(previousBlockHash, stateRoot, newBlock.blockNumber, newBlock.timestamp, newBlock.transactions, BigInt(bestResult.nonce));
         newBlock.nonce = BigInt(bestResult.nonce);
 
@@ -424,70 +307,12 @@ class OptimisticRollup {
         this.chain.addBlock(newBlock);
         this.currentBlockNumber = newBlock.blockNumber + BigInt(1);
         console.log("newBlock before submit", newBlock)
-
+        // 배치 제출
         await this.submitBatch(batchData, stateRoot, transactionRoot);
         this.pendingTransactions = [];
 
         return batchId
     }
-
-    private async gzipCompress(data: string): Promise<string> {
-        return new Promise((resolve, reject) => {
-            zlib.gzip(data, (error, result) => {
-                if (error) {
-                    reject(error);
-                } else {
-                    console.log("gzipCompress result (Buffer):", result); // 디버깅 로그 추가
-                    const base64Result = result.toString('base64');
-                    console.log("gzipCompress result (Base64):", base64Result); // 디버깅 로그 추가
-                    resolve(base64Result); // Base64 인코딩
-                }
-            });
-        });
-    }
-
-    private executePendingTransactions(): void {
-        this.pendingTransactions.forEach(tx => {
-            this.updateAccountState(tx);
-        });
-    }
-
-    private encodeBatchData(batch: SignedTransaction[]): string {
-        const encodedTx = batch.map(tx => {
-            if (tx.amount < 0 || tx.nonce < 0) {
-                throw new Error(`Invalid transaction: amount or nonce is negative. Amount: ${tx.amount}, Nonce: ${tx.nonce}`);
-            }
-    
-            // BigInt 값을 바이트 배열로 변환
-            const amountBytes = ethers.utils.arrayify(ethers.BigNumber.from(tx.amount.toString()));
-            const nonceBytes = ethers.utils.arrayify(ethers.BigNumber.from(tx.nonce.toString()));
-            const feeBytes = ethers.utils.arrayify(ethers.BigNumber.from(tx.fee.toString()));
-            const gasPriceBytes = ethers.utils.arrayify(ethers.BigNumber.from(tx.gasPrice.toString()));
-            const gasLimitBytes = ethers.utils.arrayify(ethers.BigNumber.from(tx.gasLimit.toString()));
-            const chainIdBytes = ethers.utils.arrayify(ethers.BigNumber.from(tx.chainId));
-            const v = ethers.utils.arrayify(ethers.BigNumber.from(tx.v));
-
-            const rlpEncoded = ethers.utils.RLP.encode([
-                tx.from,
-                tx.to,
-                amountBytes,
-                nonceBytes,
-                feeBytes,
-                gasPriceBytes,
-                gasLimitBytes,
-                chainIdBytes,
-                v,
-                tx.r,
-                tx.s,
-                tx.data
-            ]);
-            return rlpEncoded;
-            });
-    
-        const encodedBatch = ethers.utils.RLP.encode(encodedTx);
-        return encodedBatch;
-    }
-    
 
     private async submitBatch(batch: Batch, stateRoot: string, transactionRoot: string): Promise<void> {
         try {
@@ -495,6 +320,8 @@ class OptimisticRollup {
             if (!signer) {
                 throw new Error("L1 Contract requires a signer");
             }
+
+            // 스마트 컨트랙트에서 직접 처리할 수 있는 16진수 문자열로 변환
             const hexlifiedCalldata = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(batch.calldata));
 
            
@@ -508,14 +335,14 @@ class OptimisticRollup {
             //     console.log(`TransactionBatchAppended event detected: calldata = ${hexlifiedCalldata}`);
             // });
             
-
+            // 가스 추정을 사용하여 가스 한도 설정
             const sccGasEstimate = await this.l1Contract.estimateGas.appendStateBatch(hexlifiedCalldata, stateRoot, transactionRoot, batch.proposer, batch.batchId);
             const sccTx = await this.l1Contract.appendStateBatch(hexlifiedCalldata, stateRoot, transactionRoot, batch.proposer, batch.batchId, {
                 gasLimit: sccGasEstimate
             });
             await sccTx.wait();
             console.log(`State batch submitted with state root: ${stateRoot}`);
-
+            // 이벤트 리스너 등록
             this.l1Contract.on('StateBatchAppended', (batchIndex, calldata, stateRoot, proposer, batchId) => {
                 console.log(`StateBatchAppended event detected: batchIndex = ${batchIndex}, calldata = ${calldata} stateRoot = ${stateRoot}, proposer = ${proposer}, batchId = ${batchId}`);
             });
@@ -528,68 +355,27 @@ class OptimisticRollup {
         }
     }
 
-    private async updateAccountState(tx: SignedTransaction & { nonce: bigint }): Promise<void> {
-        if (tx.amount < 0 || tx.nonce < 0) {
-            throw new Error(`Invalid transaction: amount or nonce is negative. Amount: ${tx.amount}, Nonce: ${tx.nonce}`);
-        }
-       
-        const fromAccount = this.accounts.get(tx.from) || { balance: BigInt(0), nonce: BigInt(0) };
-        if (fromAccount.balance < tx.amount) {
-            throw new Error(`Insufficient balance. Account: ${tx.from}, Balance: ${fromAccount.balance}, Amount: ${tx.amount}`);
-        }
-        console.log("tx전",fromAccount.balance, tx.amount, tx.nonce)
-    
-        fromAccount.balance -= tx.amount;
-        fromAccount.nonce += BigInt(1);
-        this.accounts.set(tx.from, fromAccount);
+    // 헬퍼 함수들
 
-        console.log("tx후",fromAccount.balance, tx.amount, tx.nonce)
-    
-        const toAccount = this.accounts.get(tx.to) || { balance: BigInt(0), nonce: BigInt(0) };
-        toAccount.balance += tx.amount;
-        this.accounts.set(tx.to, toAccount);
-
-        const stateRoot = this.computeStateRoot();
-        await this.db.put(`stateRoot:${tx.hash}`, stateRoot);
-        console.log("stateroot", stateRoot)
-        const check = await this.db.get(`stateRoot:${tx.hash}`);
-        console.log("newcheck",check)
-        
-         // BigInt 값을 문자열로 변환하여 JSON 직렬화
-        const txLog = {
-            ...tx,
-            gasPrice: tx.gasPrice.toString(),
-            gasLimit: tx.gasLimit.toString(),
-            fee : tx.fee.toString(),
-            amount: tx.amount.toString(),
-            nonce: tx.nonce.toString()
-        };
-        const snap1 = await this.db.put(`txLog:${tx.hash}`, JSON.stringify(txLog)); 
-        const snap2 = await this.db.get(`txLog:${tx.hash}`);
-        console.log("snap2", snap2)
-        const snap = await this.saveSnapshot(tx.hash, JSON.stringify(txLog) )
-        console.log(snap, "snap")
+    // pendingTransactions 배열에 트랜잭션 추가
+    async addTransaction(tx: Transaction, signer: ethers.Signer): Promise<void> {
+        const signedTx = await this.transactionService.signTransaction(tx, signer);
+        if (await this.transactionService.verifyTransaction(signedTx.signedTx, signedTx.sig)) {
+            this.pendingTransactions.push(signedTx.signedTx);
+        } else {
+            throw new Error("Transaction verification failed");
         }
-
-    private computeStateRoot(): string {
-        const leaves = Array.from(this.accounts.entries()).map(([address, account]) => {
-            const balanceBytes = ethers.utils.arrayify(ethers.BigNumber.from(account.balance.toString()).toHexString());
-            const nonceBytes = ethers.utils.arrayify(ethers.BigNumber.from(account.nonce.toString()).toHexString());
-    
-            const encodedAccount = ethers.utils.RLP.encode([
-                address,
-                balanceBytes,
-                nonceBytes
-            ]);
-            return ethers.utils.keccak256(encodedAccount);
-        });
-    
-        const merkleTree = MerkleTree.buildMerkleTree(leaves);
-        return merkleTree[merkleTree.length - 1][0];
     }
-    
 
-    private computeTransactionRoot(transactions: SignedTransaction[]): string {
+    // 트랜잭션 대기 배열 실행
+    private executePendingTransactions(): void {
+        this.pendingTransactions.forEach(tx => {
+            this.stateService.updateAccountState(tx);
+        });
+    }
+
+    // 트랜잭션 루트 계산, RLP 사용해야함
+    private computeTransactionRoot(transactions: SignedTransaction[]): string { 
         const leaves = transactions.map(tx => ethers.utils.keccak256(
             ethers.utils.defaultAbiCoder.encode(
                 ['address', 'address', 'uint256', 'uint256', 'uint8', 'bytes32', 'bytes32'],
@@ -639,14 +425,30 @@ class OptimisticRollup {
         return blockHash;
     }
 
-    getBalance(address: string): bigint {
+    // 배치 데이터를 압축
+    private async gzipCompress(data: string): Promise<string> {
+        return new Promise((resolve, reject) => {
+            zlib.gzip(data, (error, result) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    console.log("gzipCompress result (Buffer):", result); 
+                    const base64Result = result.toString('base64');
+                    console.log("gzipCompress result (Base64):", base64Result); 
+                    resolve(base64Result); // Base64 인코딩
+                }
+            });
+        });
+    }
+
+    // 자산 관련 함수
+
+    getBalance(address: string): bigint { // stateService로 옮길 예정
         return this.accounts.get(address)?.balance || BigInt(0);
     }
 
     deposit(address: string, amount: bigint): void {
-        const account = this.accounts.get(address) || { balance: BigInt(0), nonce: BigInt(0) };
-        account.balance += amount;
-        this.accounts.set(address, account);
+        this.stateService.deposit(address, amount);
     }
 
     // private async verifyBatch(batchId: string): Promise<void> {
@@ -701,11 +503,7 @@ class OptimisticRollup {
     //     console.log(`Batch ${batchId} verification successful`);
     // }
 
-    private async reapplyTransactions(transactions: SignedTransaction[]): Promise<void> {
-        for (const tx of transactions) {
-            await this.updateAccountState(tx);
-        }
-    }
+    
 }
 
 export default OptimisticRollup;

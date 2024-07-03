@@ -16,7 +16,7 @@ class POW {
 
         while (true) {
             hash = this.calculateHash(nonce, proposer);
-            //console.log(`Proposer: ${proposer}, Nonce: ${nonce}, Hash: ${hash}`);
+            console.log(`Proposer: ${proposer}, Nonce: ${nonce}, Hash: ${hash}`);
             if (this.isValidHash(hash)) {
                 break;
             }

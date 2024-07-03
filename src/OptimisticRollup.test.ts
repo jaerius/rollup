@@ -2,25 +2,30 @@ import { ethers } from 'ethers';
 import  OptimisticRollup from './OptimisticRollup'
 import { Transaction, SignedTransaction } from './interfaces/Transaction';
 import { get } from 'http';
+import TransactionService from './services/TransactionService';
+import StateService from './services/StateService';
+import Level from 'level';
 
 const ganachePrivateKeys = {
-    '0x4d053657D21C1AE167955b6F2A51C482270c3d80': '0x9335a4bbe49aade7b7ade8dcfc9a82c566bcca89024463067f3046d23237fa66', // 여기에 실제 개인 키를 입력합니다.
-    '0xb5fA5D69a900EC2a396e5eadDDDe387032BB469d': '0xca398a6012675a0e3087206747ce8488d511be88e68d9deba2eb4fe7529d5f16',
-    '0xD755E6DA0E0e85e2d2F1205DcecFeadC8E6246bd': '0x6fd7c2c18741c31fcbdf0153f44ac4b439d163bb426d58f2b442a345b84a7143',
-    '0xCD41fF254E65418a94202f91C4d03Da3e1D78818': '0x2a0edbe091cfe8a51ea7705a7cb2c292493ef376e00756496d719ddb80c2a076'
+    '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2': '0xfaa8c492b7fd21ed3e9a0e4f3a621bbe044f518e7867723432439015e918360c', // 여기에 실제 개인 키를 입력합니다.
+    '0x001E436e37973c207b14053d78897DaB17d7cc4d': '0x27b3b8bd057b6409219805199d3ee149c0cf57983fa5c7af720303c7e9bf34c0',
+    '0xD341949f9CDDc00953CF4E2050F380989d810CB4': '0x87373d62bac14d7f778aadaf90f1ab2c91540a84f7770b89e43b5f4d163cf654',
+    '0x12fb2d274742b3F274fe0D92cE6227C4bf60B944': '0x368d55f41d663943add2efb62be85d8986126312e913f293fdbc980f3324b25e'
 };
 
 const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545');
 
 // 서명된 트랜잭션을 생성하는 함수
 async function createSignedTransaction(tx: Transaction, signer: ethers.Signer): Promise<{ signedTx: SignedTransaction; sig: any }> {
-    const rollup = new OptimisticRollup(1);
-    return await rollup.signTransaction(tx, signer);
+
+    const transactionService = new TransactionService();
+    return await transactionService.signTransaction(tx, signer);
 }
 
 // 트랜잭션을 검증하는 함수
 async function verifyTransaction(signedTx: SignedTransaction, sig: any, rollup: OptimisticRollup): Promise<boolean> {
-    return await rollup.verifyTransaction(signedTx, sig);
+    const transactionService = new TransactionService();
+    return await transactionService.verifyTransaction(signedTx, sig);
 }
 
 async function signAndVerify(tx: Transaction, provider: ethers.providers.Provider): Promise<SignedTransaction | null> {
@@ -44,9 +49,6 @@ async function signAndVerify(tx: Transaction, provider: ethers.providers.Provide
     return isValid ? signedTx : null;
 }
 
-// async function createHash(tx: Transaction, sig: any): Promise<{ signedTx: SignedTransaction; sig: any }> {
-//     return await createHash(tx, sig);
-// }
 async function getNetworkInfo() {
     try {
       const network = await provider.getNetwork();
@@ -56,6 +58,8 @@ async function getNetworkInfo() {
       console.error('Error fetching network info:', error);
     }
   }
+
+  
   
 
 async function main() {
@@ -64,7 +68,7 @@ async function main() {
     console.log('설정을 시작합니다...');
     const difficulty = 1;
     const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545'); // 로컬 노드에 연결
-    const privateKey = '0x2a0edbe091cfe8a51ea7705a7cb2c292493ef376e00756496d719ddb80c2a076'; // 테스트용 개인 키
+    const privateKey = '0x9bb48d1859388d71be20ac50349f8f211977a3fcdb03266f35827404efcfeb35'; // 테스트용 개인 키
     console.log("getnetworkinfo",getNetworkInfo())
     const rollup = new OptimisticRollup(difficulty);
     const wallet = new ethers.Wallet(privateKey, provider);
@@ -75,12 +79,22 @@ async function main() {
         const balance = await provider.getBalance(account);
         rollup.deposit(account, BigInt(balance.toString()));
     }
+    
+    async function waitForStateBatchAppended(rollup: OptimisticRollup, batchId: string) {
+        return new Promise<void>((resolve, reject) => {
+            rollup.l1Contract.once('StateBatchAppended', (batchIndex, batchData, stateRoot, transactionsRoot, proposer, appendedBatchId) => {
+                if (appendedBatchId === batchId) {
+                    resolve();
+                }
+            });
+        });
+    }
 
     console.log('예제 트랜잭션 데이터를 준비합니다...');
     const transactions1: Transaction[] = [
         {
-            from: '0x4d053657D21C1AE167955b6F2A51C482270c3d80',
-            to: '0xb5fA5D69a900EC2a396e5eadDDDe387032BB469d',
+            from: '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2',
+            to: '0x001E436e37973c207b14053d78897DaB17d7cc4d',
             amount: BigInt(10),
             fee: BigInt(1),
             nonce: BigInt(0),
@@ -91,8 +105,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0xb5fA5D69a900EC2a396e5eadDDDe387032BB469d',
-            to: '0xD755E6DA0E0e85e2d2F1205DcecFeadC8E6246bd',
+            from: '0x001E436e37973c207b14053d78897DaB17d7cc4d',
+            to: '0xD341949f9CDDc00953CF4E2050F380989d810CB4',
             amount: BigInt(20),
             fee: BigInt(1),
             nonce: BigInt(1),
@@ -106,8 +120,8 @@ async function main() {
 
     const transactions2: Transaction[] = [
         {
-            from: '0xD755E6DA0E0e85e2d2F1205DcecFeadC8E6246bd',
-            to: '0xCD41fF254E65418a94202f91C4d03Da3e1D78818',
+            from: '0xD341949f9CDDc00953CF4E2050F380989d810CB4',
+            to: '0x12fb2d274742b3F274fe0D92cE6227C4bf60B944',
             amount: BigInt(5),
             fee: BigInt(1),
             nonce: BigInt(2),
@@ -118,8 +132,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0xD755E6DA0E0e85e2d2F1205DcecFeadC8E6246bd',
-            to: '0x4d053657D21C1AE167955b6F2A51C482270c3d80',
+            from: '0xD341949f9CDDc00953CF4E2050F380989d810CB4',
+            to: '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2',
             amount: BigInt(15),
             fee: BigInt(1),
             nonce: BigInt(3),
@@ -133,8 +147,8 @@ async function main() {
 
     const transactions3: Transaction[] = [
         {
-            from: '0x4d053657D21C1AE167955b6F2A51C482270c3d80',
-            to: '0xD755E6DA0E0e85e2d2F1205DcecFeadC8E6246bd',
+            from: '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2',
+            to: '0xD341949f9CDDc00953CF4E2050F380989d810CB4',
             amount: BigInt(3),
             fee: BigInt(1),
             nonce: BigInt(4),
@@ -145,8 +159,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0x4d053657D21C1AE167955b6F2A51C482270c3d80',
-            to: '0xCD41fF254E65418a94202f91C4d03Da3e1D78818',
+            from: '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2',
+            to: '0x12fb2d274742b3F274fe0D92cE6227C4bf60B944',
             amount: BigInt(10),
             fee: BigInt(1),
             nonce: BigInt(5),
@@ -183,27 +197,31 @@ async function main() {
         '0x8730253a7A12516A4Bc128B2aAC5cBf4f8bBb50C'
     ];
 
+
+
     // 첫 번째 배치
     console.log('첫 번째 블록 생성 중...');
     rollup.pendingTransactions.push(...signedTransactions1);
     const batchId1 = await rollup.processBatch(proposers);
-    await rollup.verifyBatch(batchId1);
     
 
+    
     // 두 번째 배치
     console.log('두 번째 블록 생성 중...');
     rollup.pendingTransactions.push(...signedTransactions2);
     const batchId2 = await rollup.processBatch(proposers);
-    
+    await rollup.verifyBatch(batchId1);
+    await waitForStateBatchAppended(rollup, batchId2);
 
     // 세 번째 배치
     console.log('세 번째 블록 생성 중...');
     rollup.pendingTransactions.push(...signedTransactions3);
     await rollup.processBatch(proposers);
     const batchId3 = await rollup.processBatch(proposers);
+    await waitForStateBatchAppended(rollup, batchId3);
 
     
-    
+    //await rollup.verifyBatch(batchId1);
     await rollup.verifyBatch(batchId2);
     await rollup.verifyBatch(batchId3);
 

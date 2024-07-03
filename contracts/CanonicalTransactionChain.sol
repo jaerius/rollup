@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.4.22 <0.9.0;
-
+// 현재 사용 x
 contract CanonicalTransactionChain {
     struct QueueElement {
         bytes32 transactionHash;

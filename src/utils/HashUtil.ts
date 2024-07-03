@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-
+//  미사용, 옮길 예정
 class HashUtil {
     public static computeBlockHash(
         previousBlockHash: string,

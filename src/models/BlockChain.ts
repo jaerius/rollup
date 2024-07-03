@@ -1,5 +1,5 @@
-import { Block } from '../models/Block';
-
+import { Block } from './Block';
+// 미사용
 export class Blockchain {
     private chain: Block[];
 
