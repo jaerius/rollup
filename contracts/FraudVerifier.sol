@@ -54,15 +54,17 @@ contract FraudVerifier {
     }
 
     // 챌린지를 시작하는 함수
-    function initiateChallenge(uint256 _batchIndex, bytes32 _txHash) public {
+    function initiateChallenge(uint256 _batchIndex, bytes32 _txHash, bytes32[] memory _merkleProof) public {
         // 챌린저가 보증금을 예치했는지 확인
         require(bondManager.bonds(msg.sender) > 0, "No bond deposited");
         // 상태 배치 정보를 가져옴
-        (bytes memory batchData, bytes32 stateRoot, uint256 timestamp, bool finalized, address proposer, bytes32 batchId) = stateCommitmentChain.getBatch(_batchIndex);
+        (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool vaild, address proposer, bytes32 batchId) = stateCommitmentChain.getBatch(_batchIndex);
         require(!finalized, "Batch already finalized");
         // 챌린지가 이미 해결되지 않았는지 확인
-        
         require(!challenges[_batchIndex].resolved, "Challenge already resolved");
+
+        bytes32 transactionsRoot = stateCommitmentChain.getBatchTransactionsRoot(_batchIndex);
+        require(verifyMerkleProof(_merkleProof, transactionsRoot, _txHash), "Invalid Merkle proof");
 
         // 챌린지 정보 저장
         challenges[_batchIndex] = Challenge({
@@ -88,6 +90,8 @@ contract FraudVerifier {
             return computedPostStateRoot == _postStateRoot;
         }
 
+  
+
      function verifyTransaction(uint256 _batchIndex, bytes memory _transaction) public view returns (bool) {
         Challenge storage challenge = challenges[_batchIndex];
         require(!challenge.resolved, "Challenge already resolved");
@@ -106,7 +110,7 @@ contract FraudVerifier {
 
         if (txHash != challenge.challengedTxHash) {
         return false;
-    }
+        }
 
        bytes32 messageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", txHash));
        (uint8 v, bytes32 r, bytes32 s) = splitSignature(txData.signature);
@@ -135,7 +139,6 @@ contract FraudVerifier {
 
         return true;
         
-        //return canonicalTransactionChain.isValidTransaction(_transaction);
     }
 
     function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
@@ -154,11 +157,13 @@ contract FraudVerifier {
         require(!challenge.resolved, "Challenge already resolved");
         require(block.timestamp >= challenge.timestamp + stateCommitmentChain.challengePeriod(), "Challenge period not over");
 
-        (bytes memory batchData, bytes32 stateRoot, uint256 timestamp, bool finalized, address proposer, bytes32 batchId) = stateCommitmentChain.getBatch(_batchIndex);
+        (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool vaild, address proposer,) = stateCommitmentChain.getBatch(_batchIndex);
         require(!finalized, "Batch already finalized");
 
         //상태 전이 검증
-        bool success = verifyStateTransition(_preStateRoot, _postStateRoot, _transaction) && verifyTransaction(_batchIndex, _transaction);
+        bool success = 
+            verifyStateTransition(_preStateRoot, _postStateRoot, _transaction) 
+            && verifyTransaction(_batchIndex, _transaction);
 
         // 챌린지 해결로 표시
         challenge.resolved = true;
@@ -177,5 +182,55 @@ contract FraudVerifier {
 
         // 챌린지 해결 이벤트 발생
         emit ChallengeResolved(_batchIndex, success, proposer);
+    }
+
+     function executeFullBatch(uint256 _batchIndex) internal returns (bytes32) {
+        (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool vaild, address proposer,) 
+        = stateCommitmentChain.getBatch(_batchIndex);       
+        uint256 txCount = canonicalTransactionChain.getBatchTransactionCount(_batchIndex);
+
+        bytes32 currentStateRoot = stateRoot;
+
+        for (uint256 i = 0; i < txCount; i++) {
+            bytes memory txData = canonicalTransactionChain.getTransaction(_batchIndex, i);
+            TransactionData memory tx = abi.decode(txData, (TransactionData));
+            
+            executeTransaction(tx);
+
+            
+            currentStateRoot = keccak256(abi.encodePacked(currentStateRoot, txData));
+        }
+
+        return stateRoot;
+    }
+
+    function executeTransaction(TransactionData memory _tx) internal {
+        // Simplified transaction execution logic
+        require(_tx.value >= MIN_TRANSACTION_AMOUNT, "Transaction value too low");
+        require(_tx.to != address(0), "Invalid recipient");
+        require(_tx.to != msg.sender, "Cannot send to self");
+
+        Account storage sender = accounts[msg.sender];
+        Account storage recipient = accounts[_tx.to];
+
+        require(sender.nonce == _tx.nonce, "Invalid nonce");
+        require(sender.balance >= _tx.value + (_tx.gasLimit * _tx.gasPrice), "Insufficient balance");
+
+        sender.balance -= _tx.value + (_tx.gasLimit * _tx.gasPrice);
+        recipient.balance += _tx.value;
+        sender.nonce++;
+    }
+
+    function verifyMerkleProof(bytes32[] memory proof, bytes32 root, bytes32 leaf) internal pure returns (bool) {
+        bytes32 computedHash = leaf;
+        for (uint256 i = 0; i < proof.length; i++) {
+            bytes32 proofElement = proof[i];
+            if (computedHash <= proofElement) {
+                computedHash = keccak256(abi.encodePacked(computedHash, proofElement));
+            } else {
+                computedHash = keccak256(abi.encodePacked(proofElement, computedHash));
+            }
+        }
+        return computedHash == root;
     }
 }

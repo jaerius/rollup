@@ -118,7 +118,7 @@ async function main() {
             hash: ''
         },
         {
-            from: '0xCD41fF254E65418a94202f91C4d03Da3e1D78818',
+            from: '0xD755E6DA0E0e85e2d2F1205DcecFeadC8E6246bd',
             to: '0x4d053657D21C1AE167955b6F2A51C482270c3d80',
             amount: BigInt(15),
             fee: BigInt(1),
@@ -186,17 +186,27 @@ async function main() {
     // 첫 번째 배치
     console.log('첫 번째 블록 생성 중...');
     rollup.pendingTransactions.push(...signedTransactions1);
-    await rollup.processBatch(proposers);
+    const batchId1 = await rollup.processBatch(proposers);
+    await rollup.verifyBatch(batchId1);
+    
 
     // 두 번째 배치
     console.log('두 번째 블록 생성 중...');
     rollup.pendingTransactions.push(...signedTransactions2);
-    await rollup.processBatch(proposers);
+    const batchId2 = await rollup.processBatch(proposers);
+    
 
     // 세 번째 배치
     console.log('세 번째 블록 생성 중...');
     rollup.pendingTransactions.push(...signedTransactions3);
     await rollup.processBatch(proposers);
+    const batchId3 = await rollup.processBatch(proposers);
+
+    
+    
+    await rollup.verifyBatch(batchId2);
+    await rollup.verifyBatch(batchId3);
+
 
     console.log('PoW 시뮬레이션 및 배치 제안 완료');
 }

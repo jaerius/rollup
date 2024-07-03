@@ -1,11 +1,15 @@
+import { Level } from 'level'
 import { ethers } from 'ethers';
-import { sha256,  toUtf8Bytes } from 'ethers/lib/utils';
+import { RLP, keccak256, sha256,  toUtf8Bytes } from 'ethers/lib/utils';
 import * as zlib from 'zlib';
 import fs from 'fs';
+import { arrayBuffer } from 'stream/consumers';
 // import { Blockchain } from './class';
 //import { POW } from './pow';
 
 const abiPath = './build/contracts/StateCommitmentChain.json';
+const abiPath2 = './build/contracts/FraudVerifier.json';
+const abiPath3 = './build/contracts/BondManager.json';
 
 const contractJson = JSON.parse(require('fs').readFileSync(abiPath, 'utf8'));
 const contractABI = contractJson.abi;
@@ -16,8 +20,18 @@ const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545');
 // 서명자 설정
 const signer = provider.getSigner();
 
+const contractJson2 = JSON.parse(require('fs').readFileSync(abiPath2, 'utf8'));
+const contractABI2 = contractJson2.abi;
+const contractAddress2 = contractJson.networks['1719649930968'].address;
+
+const contractJson3 = JSON.parse(require('fs').readFileSync(abiPath3, 'utf8'));
+const contractABI3 = contractJson3.abi;
+const contractAddress3 = contractJson.networks['1719649930968'].address;
+
 // 스마트 계약 인스턴스 생성
 const contract = new ethers.Contract(contractAddress, contractABI, signer);
+const FraudVerifierContract = new ethers.Contract(contractAddress2, contractABI2, signer);
+const BondManagerContract = new ethers.Contract(contractAddress3, contractABI3, signer);
 
 interface UnsignedTransaction { // 트랜잭션 기본 구성 필드
     to: string;
@@ -186,11 +200,14 @@ class OptimisticRollup {
     public pendingTransactions: SignedTransaction[] = [];
     private accounts: Map<string, { balance: bigint, nonce: bigint }> = new Map();
     public l1Contract: ethers.Contract;
+    public verifierContract: ethers.Contract;
+    public bondManagerContract: ethers.Contract;
     private blocks: Block[] = [];
     private currentBlockNumber: bigint = BigInt(0);
     private pow: POW;
     private chain: Blockchain;
-    
+    public db: Level;
+    public previousSnapshotKey: string = '';
 
     // 구현 할 것
     // tx with sig -> mempool(x) -> tx수집 및 verify -> L2 stateroot 변경 -> 블록 생성 -> L2에서는 상태 변화 끝
@@ -199,13 +216,10 @@ class OptimisticRollup {
     // 트랜잭션 관련 함수
 
     constructor(difficulty: number) {
-        // const abi = [
-        //     "function submitBatch(bytes32 _stateRoot, bytes _transactions) external",
-        //     "event BatchSubmitted(uint256 indexed batchId, bytes32 stateRoot)"
-        // ];
-        // this.l1Contract = new ethers.Contract(l1ContractAddress, abi, provider);
-
+        
         this.l1Contract = contract;
+        this.verifierContract = FraudVerifierContract;
+        this.bondManagerContract = BondManagerContract;
 
         const genesisBlockData: BlockData = {
             transactions: [],
@@ -226,6 +240,8 @@ class OptimisticRollup {
         this.chain.addBlock(genesisBlock);
         this.currentBlockNumber = BigInt(1);
         const previousBlockHash = genesisBlock.blockHash;
+        this.db = new Level('./db');
+        this.previousSnapshotKey = '';
         
     }
     async setChallengePeriod(period: number) {
@@ -362,9 +378,12 @@ class OptimisticRollup {
         this.executePendingTransactions();
         console.log("execute transactions", this.pendingTransactions)
 
-        // 2. 상태 루트 계산
+        // 2. 상태 루트 계산 -> 이건 이제 배치의 상태 루트가 됨
         const stateRoot = this.computeStateRoot();
         console.log("stateRoot", stateRoot)
+
+        const transactionRoot = this.computeTransactionRoot(this.pendingTransactions);
+        console.log("transactionRoot", transactionRoot)
 
         // 3. 배치 생성
         const previousBlockHash = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].blockHash : ethers.constants.HashZero;
@@ -398,6 +417,15 @@ class OptimisticRollup {
         console.log("bestResult", bestResult)
         const batchId = ethers.utils.keccak256(ethers.utils.randomBytes(32));
         const batchData: Batch = { proposer: bestResult.proposer, timestamp, calldata: compressedCalldata, batchId };
+        // db에 스냅샷 찍음
+        const snapshotKey = `snapshot:${batchId}`;
+        await this.db.put(snapshotKey, JSON.stringify({
+            timestamp,
+            blockNumber: this.currentBlockNumber,
+            stateRoot,
+            previousSnapshotKey : this.previousSnapshotKey
+        }));
+        this.previousSnapshotKey = snapshotKey;
         console.log("batchData", batchData)
         
         // 블록 해시 계산
@@ -410,7 +438,7 @@ class OptimisticRollup {
        
         console.log("newBlock before submit", newBlock)
         // 배치를 L1에 제출합니다.
-        await this.submitBatch(batchData, stateRoot);
+        await this.submitBatch(batchData, stateRoot, transactionRoot);
         //batchId, state root, proposer, batchdata 모두 들어있음 txdata에
         // compressed calldata
 
@@ -438,44 +466,38 @@ class OptimisticRollup {
     }
 
     private encodeBatchData(batch: SignedTransaction[]): string {
-        const encodedBatch = batch.map(tx => {
+
+        // 1. 트랜잭션 각각의 rlp 인코딩
+        // 2. 각 트랜잭션을 하나의 배열로 묶어서 rlp 인코딩 -> 배치 구조 생성
+
+        const encodedtx = batch.map(tx => {
             if (tx.amount < 0 || tx.nonce < 0) {
                 throw new Error(`Invalid transaction: amount or nonce is negative. Amount: ${tx.amount}, Nonce: ${tx.nonce}`);
             }
-            return [tx.from, tx.to, tx.amount, tx.nonce, tx.v, tx.r, tx.s];
-        });
-    
-        console.log("Encoded batch data:", encodedBatch);
+            
+            const rlpEncoded = RLP.encode([tx.from, tx.to, tx.amount, tx.nonce, tx.v, tx.r, tx.s])
+            return rlpEncoded;
+        })
 
-        try {
-            return ethers.utils.defaultAbiCoder.encode(
-                ['tuple(address from, address to, uint256 amount, uint256 nonce, uint8 v, bytes32 r, bytes32 s)[]'],
-                [encodedBatch]
-            );
-        } catch (error) {
-            console.error('Error encoding batch:', error);
-            console.error('Problematic batch:', JSON.stringify(batch, (key, value) =>
-                typeof value === 'bigint' ? value.toString() : value
-            ));
-            throw error;
-        }
+        const encodedBatch = RLP.encode(encodedtx);
+
+        return encodedBatch;
     }
     
-    private async submitBatch(batch: Batch, stateRoot: string): Promise<void> {
+    private async submitBatch(batch: Batch, stateRoot: string, transactionRoot: string): Promise<void> {
         try {
             const signer = this.l1Contract.signer;
             if (!signer) {
                 throw new Error("L1 Contract requires a signer");
             }
-    
+            // 스마트 컨트랙트에서 직접 처리할 수 있는 16진수 문자열로 변환
             const hexlifiedCalldata = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(batch.calldata));
-           
-    
+            
             // 가스 추정을 사용하여 가스 한도 설정
             const gasEstimate = await this.l1Contract.estimateGas.appendStateBatch(hexlifiedCalldata, stateRoot, batch.proposer, batch.batchId);
             
             // 트랜잭션 생성 및 전송
-            const tx = await this.l1Contract.appendStateBatch(hexlifiedCalldata, stateRoot, batch.proposer, batch.batchId, {
+            const tx = await this.l1Contract.appendStateBatch(hexlifiedCalldata, stateRoot, transactionRoot, batch.proposer, batch.batchId, {
                 gasLimit: gasEstimate
             });
             await tx.wait();
@@ -494,7 +516,7 @@ class OptimisticRollup {
         }
     }
 
-    private updateAccountState(tx: SignedTransaction & { nonce: bigint }): void {
+    private async updateAccountState(tx: SignedTransaction & { nonce: bigint }): Promise<void> {
         if (tx.amount < 0 || tx.nonce < 0) {
             throw new Error(`Invalid transaction: amount or nonce is negative. Amount: ${tx.amount}, Nonce: ${tx.nonce}`);
         }
@@ -515,17 +537,24 @@ class OptimisticRollup {
         const toAccount = this.accounts.get(tx.to) || { balance: BigInt(0), nonce: BigInt(0) };
         toAccount.balance += tx.amount;
         this.accounts.set(tx.to, toAccount);
+
+
+        const stateRoot = this.computeStateRoot();
+        // db에 저장
+        await this.db.put(`stateRoot:${tx.hash}`, stateRoot)
+        // 트랜잭션 로그 저장
+        await this.db.put(`txLog:${tx.hash}`, JSON.stringify(tx));  
     }
 
     private computeStateRoot(): string { // 제대로 알아보기, rlp encoding사용하기
-        const leaves = Array.from(this.accounts.entries()).map(([address, account]) =>
-            ethers.utils.keccak256(
-                ethers.utils.defaultAbiCoder.encode(
-                    ['address', 'uint256', 'uint256'],
-                    [address, account.balance, account.nonce]
-                )
-            )
-        );
+        const leaves = Array.from(this.accounts.entries()).map(([address, account]) => {
+            const encodedAccount = RLP.encode([
+                BigInt(address),
+                account.balance,
+                account.nonce
+            ]);
+            return keccak256(encodedAccount);
+         });
 
         const merkleTree = this.buildMerkleTree(leaves);
         console.log("merkleTree", merkleTree)
@@ -544,6 +573,7 @@ class OptimisticRollup {
         return merkleTree[merkleTree.length - 1][0];
     }
 
+    //다시 보기
     private buildMerkleTree(leaves: string[]): string[][] { // MPT 써보기
         if (leaves.length === 0) return [['']];
         
@@ -624,6 +654,113 @@ class OptimisticRollup {
         const account = this.accounts.get(address) || { balance: BigInt(0), nonce: BigInt(0) };
         account.balance += amount;
         this.accounts.set(address, account);
+    }
+
+    // db에서 배치에 해당하는 tx, state가져오기
+    // gzip 압축해제, rlp 디코딩 두 번 해제
+    // tx, state로 상태전이 검증
+    // 틀렸을 때, 맞았을 때 로직
+    // 그렇다면 db에 batchIndex, txHash, stateRoot가 있어야 함 -> snapshot기능 사용해야하나?
+
+    private async verifyBatch(batchId: string): Promise<void> {
+        const snapshotKey = `snapshot:${batchId}`;
+        const snapshot = JSON.parse(await this.db.get(snapshotKey));        
+        if (!snapshot) {
+            throw new Error(`Snapshot not found for batch ID: ${batchId}`);
+        }
+
+        const previousSnapshotKey = snapshot.previousSnapshotKey;
+        const previousSnapshot = previousSnapshotKey ? JSON.parse(await this.db.get(previousSnapshotKey)) : null;
+        
+        // 검증을 위한 초기 상태 루트
+        let stateRoot = previousSnapshot ? previousSnapshot.stateRoot : ethers.constants.HashZero;
+        const txLogs = [];
+        const stateRoots = [];
+
+        // 이전 스냅샷부터 현재 스냅샷 사이의 트랜잭션 로그를 가져오기
+        let currentBlockNumber = previousSnapshot ? previousSnapshot.blockNumber + 1 : 0;
+        while (currentBlockNumber <= snapshot.blockNumber) {
+            const blockData = this.blocks[currentBlockNumber];
+            for (const tx of blockData.transactions) {
+                const txLog = JSON.parse(await this.db.get(`txLog:${tx.hash}`));
+                txLogs.push(txLog);
+                const stateRoot = await this.db.get(`stateRoot:${tx.hash}`);
+                stateRoots.push(stateRoot);
+            }
+            currentBlockNumber++;
+        }
+
+         // 머클 트리 생성
+        const leaves = txLogs.map(tx => ethers.utils.keccak256(ethers.utils.toUtf8Bytes(JSON.stringify(tx))));
+        const merkleTree = this.buildMerkleTree(leaves);
+        const root = merkleTree[merkleTree.length - 1][0];
+
+        // 트랜잭션 로그를 재실행하여 상태 루트를 검증
+        for (let i = 0; i < txLogs.length; i++) {
+            const txLog = txLogs[i];
+            const expectedStateRoot = stateRoots[i];
+
+            this.applyTransaction(txLog); // 트랜잭션을 재실행하는 함수
+            const computedStateRoot = this.computeStateRoot();
+            let previousStateRoot : string = '0x';
+            if (computedStateRoot !== expectedStateRoot) {
+                console.log(`State root mismatch for transaction ${txLog.hash}`);
+
+                const proof = this.generateMerkleProof(merkleTree, txLog.hash);
+                await this.bondManagerContract.deposit();
+                await this.verifierContract.initiateChallenge(batchId, i, proof);
+
+                // 챌린지 해결은 FraudVerifier 컨트랙트에 위임
+                console.log(`Challenge submitted for batch ${batchId}, transaction index ${i}`);
+                return;
+
+                // await this.verifierContract.initiateChallenge(batchId , txLog.hash``); // 머클 증명 및 previousstateRoot, txLog가 들어가야함
+                // const isTransactionValid = await this.verifierContract.verifyTransaction(batchId, txLog.hash);
+                // const isTransitionValid = await this.verifierContract.verifyTransition(txLog, previousStateRoot, computedStateRoot); // 트랜잭션 인덱스가 들어가도록 해야함
+            
+                // if (!isTransactionValid || !isTransitionValid){
+                //     // 
+                // }
+            } else {
+                previousStateRoot = computedStateRoot
+            }
+
+           // await this.l1Contract.
+        }
+
+        console.log(`Batch ${batchId} verification successful`);
+        
+    
+    }
+
+    private applyTransaction(tx: SignedTransaction & { nonce: bigint }): void { // 실제로 실행하는게 아니라 테스트 해야함
+        // 이 함수는 주어진 트랜잭션을 실제로 재실행합니다.
+        const fromAccount = this.accounts.get(tx.from) || { balance: BigInt(0), nonce: BigInt(0) };
+        fromAccount.balance -= tx.amount;
+        fromAccount.nonce += BigInt(1);
+        this.accounts.set(tx.from, fromAccount);
+    
+        const toAccount = this.accounts.get(tx.to) || { balance: BigInt(0), nonce: BigInt(0) };
+        toAccount.balance += tx.amount;
+        this.accounts.set(tx.to, toAccount);
+    }
+
+    private generateMerkleProof(tree: string[][], index: number): string[] {
+        const proof: string[] = [];
+        let currentIndex = index;
+    
+        for (let i = 0; i < tree.length - 1; i++) {
+            const levelLength = tree[i].length;
+            const pairIndex = currentIndex % 2 === 0 ? currentIndex + 1 : currentIndex - 1;
+    
+            if (pairIndex < levelLength) {
+                proof.push(tree[i][pairIndex]);
+            }
+    
+            currentIndex = Math.floor(currentIndex / 2);
+        }
+    
+        return proof;
     }
 }
 
