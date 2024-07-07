@@ -77,6 +77,8 @@ contract FraudVerifier {
 
         // 챌린지 시작 이벤트 발생
         emit ChallengeInitiated(_batchId, msg.sender, _txHash);
+
+        
     }
 
     // 상태 전이를 검증하는 함수
@@ -182,23 +184,37 @@ contract FraudVerifier {
     }
 
     // 배치 내의 모든 트랜잭션을 실행하는 함수, 챌린지가 들어왔을때 L1에서의 검증 용도
-    function executeFullBatch(bytes32 _batchId) internal returns (bytes32) {
+    function executeFullBatch(bytes32 _batchId, Trnasaction[] memory transactions) external returns (bytes32) {
         (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool valid, address proposer, bytes32 batchId, uint256 batchIndex) 
         = stateCommitmentChain.getBatchByBatchId(_batchId);       
         uint256 txCount = canonicalTransactionChain.getBatchTransactionCount(batchIndex);
 
-        bytes32 currentStateRoot = stateRoot;
+        bytes32 currentStateRoot = stateCommitmentChain.getPreviousStateRoot(_batchId);
+        bytes32 computedTransactionsRoot = bytes32(0);
 
-        for (uint256 i = 0; i < txCount; i++) {
-            bytes memory txData = canonicalTransactionChain.getTransaction(batchIndex, i);
-            TransactionData memory tx = abi.decode(txData, (TransactionData));
+        for (uint256 i = 0; i < transactions.length; i++) {
+            TransactionData memory tx = transactions[i];
             
+            // 트랜잭션 실행
             executeTransaction(tx);
 
-            currentStateRoot = keccak256(abi.encodePacked(currentStateRoot, txData));
+            // 현재 상태 루트 업데이트
+            currentStateRoot = keccak256(abi.encodePacked(currentStateRoot, abi.encode(tx)));
+
+            // 트랜잭션 루트 계산을 위한 해시 업데이트
+            computedTransactionsRoot = keccak256(abi.encodePacked(computedTransactionsRoot, abi.encode(tx)));
         }
 
-        return currentStateRoot;
+        
+        if (currentStateRoot != stateRoot || computedTransactionsRoot != transactionsRoot) {
+        // 불일치 발견, 배치 무효화
+            stateCommitmentChain.invalidateBatch(batchIndex);
+            return currentStateRoot;
+        }   
+
+        // 모든 검증 통과, 배치 유효
+        //emit BatchValidated(batchIndex);
+        return stateRoot;
     }
 
     // 트랜잭션을 실행하는 함수, 상태를 업데이트 한다

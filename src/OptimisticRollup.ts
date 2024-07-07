@@ -37,6 +37,7 @@ class OptimisticRollup {
     private stateRoot: string;
     private transactionService: TransactionService;
     private stateService: StateService;
+    private invalidTransactionHashes: Set<string> = new Set();
 
     constructor(difficulty: number) {
         this.l1Contract = contract;
@@ -72,13 +73,39 @@ class OptimisticRollup {
     // challenge, rollback 관련 함수들 작업 필요
 
     private setupEventListeners() {
-        this.l1Contract.on('BatchInvalidated', async (batchIndex: number) => {
+        this.l1Contract.on('BatchInvalidated', async (batchIndex: number, txHash: string) => {
+            this.invalidTransactionHashes.add(txHash);
             await this.handleBatchInvalidation(batchIndex);
+        });
+
+        // this.verifierContract.on('ChallengeInitiated', async (batchId: string, challenger: string, txHash: string) => {
+        //     console.log(`Challenge initiated for batch ${batchId}`);
+        //     await this.resolveChallenge(batchId);
+        // });
+    
+        this.verifierContract.on('ChallengeResolved', async (batchId: string, success: boolean, proposer: string) => {
+            console.log(`Challenge resolved for batch ${batchId}. Success: ${success}`);
+            if (!success) {
+                const batch = await this.l1Contract.getBatchByBatchId(batchId);
+                await this.handleBatchInvalidation(batch.batchIndex);
+            }
         });
     }
 
     private async handleBatchInvalidation(invalidatedBatchIndex: number) {
+
         const latestValidBatch = await this.l1Contract.getLatestValidBatch();
+
+        // 여기에서 LastestValidBatch의 previousState를 알아야함
+        // 다시 그 previousState를 가지고 invalidate trnasaction을 제외한 배치를 다시 실행해야함
+        // 그러면 컨트랙트에서 invalidate된 트랜잭션들을 데이터 베이스에 저장, 그리고 여기서 다시 가져와서 실행
+        // 그런데 굳이 다시 가져오지 않더라도, 데이터 베이스에서 배치 index와 트랜잭션 index를 가지고 찾아서 해당 배치 및 다음 배치를 실행시키면 되겠네
+        // 그러면 이전 상태를 가져와서 다시 실행시키는 것이 아니라, invalidate된 트랜잭션을 제외한 배치를 다시 실행시키면 되겠네
+
+        // 
+        const previousStateRoot = latestValidBatch.stateRoot;
+
+
         const transactionsToReapply = await this.getTransactionsAfterBatch(latestValidBatch);
         await this.stateService.revertToState(latestValidBatch);
         for (const tx of transactionsToReapply) {
@@ -91,13 +118,18 @@ class OptimisticRollup {
         const transactions: SignedTransaction[] = [];
         const currentBatchCount = await this.l1Contract.getBatchCount();
 
-        for (let i = batchIndex + 1; i < currentBatchCount; i++) {
+        for (let i = batchIndex; i < currentBatchCount; i++) {
             const batchData = await this.l1Contract.getBatch(i);
-            if (batchData.valid) {
+            if (!batchData.valid) { // 배치가 유효하지 않으면서
                 const decodedTransactions = await this.transactionService.decodeBatchData(batchData.batchData);
-                transactions.push(...decodedTransactions);
+                for (const tx of decodedTransactions) { // 트랜잭션에 tx가 invalid하지 않은 것 배열에 추가
+                    if (!this.invalidTransactionHashes.has(tx.hash)) {
+                        transactions.push(tx); // 다른 배열에 따로 하는건 맞지 않을 것 같고, pendingTransactions에 넣어야 할 것 같다. 제일 앞에 어떻게?
+                    }
+                } 
+                }
             }
-        }
+        
 
         return transactions;
     }
@@ -137,24 +169,24 @@ class OptimisticRollup {
         this.stateRoot = this.stateService.computeStateRoot();
     }
 
-    private async getSnapshotAtBatch(batchIndex: number): Promise<any> {
-        const state = await this.db.get(`snapshot:${batchIndex}`);
-        return {
-            accounts: new Map(JSON.parse(state).accounts),
-            stateRoot: JSON.parse(state).stateRoot
-        };
-    }
+    // private async getSnapshotAtBatch(batchIndex: number): Promise<any> {
+    //     const state = await this.db.get(`snapshot:${batchIndex}`);
+    //     return {
+    //         accounts: new Map(JSON.parse(state).accounts),
+    //         stateRoot: JSON.parse(state).stateRoot
+    //     };
+    // }
 
-    private async getLatestSnapshotInfo(): Promise<{ key: string; blockNumber: bigint }> {
-        if (!this.previousSnapshotKey) {
-            return { key: '', blockNumber: BigInt(0) };
-        }
-        const snapshotData = JSON.parse(await this.db.get(this.previousSnapshotKey));
-        return {
-            key: this.previousSnapshotKey,
-            blockNumber: BigInt(snapshotData.blockNumber)
-        };
-    }
+    // private async getLatestSnapshotInfo(): Promise<{ key: string; blockNumber: bigint }> {
+    //     if (!this.previousSnapshotKey) {
+    //         return { key: '', blockNumber: BigInt(0) };
+    //     }
+    //     const snapshotData = JSON.parse(await this.db.get(this.previousSnapshotKey));
+    //     return {
+    //         key: this.previousSnapshotKey,
+    //         blockNumber: BigInt(snapshotData.blockNumber)
+    //     };
+    // }
 
     private setStateRoot(stateRoot: string) {
         this.stateRoot = stateRoot;
@@ -216,6 +248,7 @@ class OptimisticRollup {
                     const proof = MerkleTree.generateMerkleProof(merkleTree, i);
                     console.log(`Computed Merkle Root for transaction ${i}:`, root);
                     await this.challenge(batchId, tx.hash, proof);
+                    await this.verifyChallenge(batchId, tx.hash, transactions); // 챌린지 검증
                     return;
                 }
         
@@ -233,6 +266,21 @@ class OptimisticRollup {
         console.log(`Challenging batch ${batchId}, transaction ${transactionIndex} due to ${proof}`);
         await this.bondManagerContract.deposit({ value : ethers.utils.parseEther('1')}); // 보증금 예치
         await this.verifierContract.initiateChallenge(batchId, transactionIndex, proof); // 챌린지 신청
+        
+    }
+
+    async verifyChallenge(batchId: string, txHash: string, transactions: SignedTransaction[]): Promise<boolean> {
+        const challenge = await this.verifierContract.challenges(batchId);
+        if (challenge.resolved) {
+            console.log("Challenge already resolved");
+            return false;
+        }
+    
+       await this.verifierContract.executeFullBatch(batchId, transactions, txHash);
+       
+    //    const batch = await this.l1Contract.getBatchByBatchId(batchId);
+
+        return ;
     }
 
     async setChallengePeriod(period: number) {

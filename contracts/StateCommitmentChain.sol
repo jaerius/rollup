@@ -14,16 +14,17 @@ contract StateCommitmentChain {
         uint256 batchIndex;
     }
 
-    BatchInfo[] public batches;
+    BatchInfo[] public batches; // storage이므로 상태에 영향을 줌
     uint256 public latestValidBatch;
     uint256 public challengePeriod = 7 days;
+    bytes32 public stateRoot;
 
     event StateBatchAppended(uint256 indexed batchIndex, bytes batchData, bytes32 stateRoot, bytes32 transactionsRoot, address proposer, bytes32 batchId);
     event StateBatchFinalized(uint256 indexed batchIndex);
     event ChallengePeriodUpdated(uint256 newChallengePeriod);
     event BatchInvalidated(uint256 indexed batchIndex);
 
-    function appendStateBatch(bytes memory _calldata, bytes32 _stateRoot, bytes32 _transactionsRoot, address _proposer, bytes32 _batchId) public {
+    function appendStateBatch(bytes calldata _calldata, bytes32 _stateRoot, bytes32 _transactionsRoot, address _proposer, bytes32 _batchId) public {
         // 원래 배치의 상태는 scc에, 배치 데이터는 ctc에 저장하려 했지만, 한 곳에 배치의 상태 & 데이터 저장
         BatchInfo memory newBatch = BatchInfo({ 
             batchData: _calldata,
@@ -39,6 +40,7 @@ contract StateCommitmentChain {
 
         batches.push(newBatch);
         uint256 newBatchIndex = batches.length - 1;
+        stateRoot = _stateRoot;
 
         if (newBatchIndex == 0 || batches[newBatchIndex - 1].valid) {
             latestValidBatch = newBatchIndex;
@@ -62,13 +64,18 @@ contract StateCommitmentChain {
         require(!batches[_batchIndex].finalized, "Cannot invalidate finalized batch");
         require(batches[_batchIndex].valid, "Batch already invalidated");
 
-        batches[_batchIndex].valid = false;
+        for (uint256 i = _batchIndex + 1; i < batches.length; i++) {
+            batches[i].valid = false;
+        }
 
         if (_batchIndex == latestValidBatch) {
             while (latestValidBatch > 0 && !batches[latestValidBatch].valid) {
                 latestValidBatch--;
             }
         }
+
+        // 상태 루트를 이전 유효한 배치의 상태 루트로 변경
+        stateRoot = batches[latestValidBatch].stateRoot;
 
         emit BatchInvalidated(_batchIndex);
     }
