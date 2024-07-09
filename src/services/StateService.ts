@@ -31,10 +31,21 @@ class StateService {
         this.accounts.set(tx.to, toAccount);
 
         const stateRoot = this.computeStateRoot();
-        await this.db.put(`stateRoot:${tx.hash}`, stateRoot);
-        console.log("stateroot", stateRoot)
-        const check = await this.db.get(`stateRoot:${tx.hash}`);
-        console.log("newcheck",check)
+        const key = `stateRoot:${tx.hash}`;
+        console.log("Saving stateRoot:", stateRoot, "with key:", key);
+        
+        try {
+            await this.db.put(key, stateRoot);
+            console.log("stateroot", stateRoot);
+
+            // 잠시 대기
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            const check = await this.db.get(key);
+            console.log("new check", key, check);
+        } catch (error) {
+            console.error("Error storing or fetching state root:", error);
+        }
         
          // BigInt 값을 문자열로 변환하여 JSON 직렬화
         const txLog = {

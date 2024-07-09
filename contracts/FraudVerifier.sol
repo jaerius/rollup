@@ -184,17 +184,17 @@ contract FraudVerifier {
     }
 
     // 배치 내의 모든 트랜잭션을 실행하는 함수, 챌린지가 들어왔을때 L1에서의 검증 용도
-    function executeFullBatch(bytes32 _batchId, Trnasaction[] memory transactions) external returns (bytes32) {
+    function executeFullBatch(bytes32 _batchId, bytes[] memory transactions, bytes32 _txHash) external returns (bytes32) {
         (bytes memory batchData, bytes32 stateRoot, bytes32 transactionRoot, uint256 timestamp, bool finalized, bool valid, address proposer, bytes32 batchId, uint256 batchIndex) 
         = stateCommitmentChain.getBatchByBatchId(_batchId);       
-        uint256 txCount = canonicalTransactionChain.getBatchTransactionCount(batchIndex);
+       // uint256 txCount = canonicalTransactionChain.getBatchTransactionCount(batchIndex);
 
         bytes32 currentStateRoot = stateCommitmentChain.getPreviousStateRoot(_batchId);
         bytes32 computedTransactionsRoot = bytes32(0);
 
+
         for (uint256 i = 0; i < transactions.length; i++) {
-            TransactionData memory tx = transactions[i];
-            
+            TransactionData memory tx = abi.decode(transactions[i], (TransactionData));            
             // 트랜잭션 실행
             executeTransaction(tx);
 
@@ -206,9 +206,10 @@ contract FraudVerifier {
         }
 
         
-        if (currentStateRoot != stateRoot || computedTransactionsRoot != transactionsRoot) {
+        if (currentStateRoot != stateRoot || computedTransactionsRoot != transactionRoot) {
         // 불일치 발견, 배치 무효화
-            stateCommitmentChain.invalidateBatch(batchIndex);
+            stateCommitmentChain.invalidateBatch(batchIndex, _txHash);
+
             return currentStateRoot;
         }   
 

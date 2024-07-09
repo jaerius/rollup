@@ -115,7 +115,7 @@ class OptimisticRollup {
     }
 
     private async getTransactionsAfterBatch(batchIndex: number): Promise<SignedTransaction[]> {
-        const transactions: SignedTransaction[] = [];
+        // const transactions: SignedTransaction[] = [];
         const currentBatchCount = await this.l1Contract.getBatchCount();
 
         for (let i = batchIndex; i < currentBatchCount; i++) {
@@ -124,14 +124,14 @@ class OptimisticRollup {
                 const decodedTransactions = await this.transactionService.decodeBatchData(batchData.batchData);
                 for (const tx of decodedTransactions) { // 트랜잭션에 tx가 invalid하지 않은 것 배열에 추가
                     if (!this.invalidTransactionHashes.has(tx.hash)) {
-                        transactions.push(tx); // 다른 배열에 따로 하는건 맞지 않을 것 같고, pendingTransactions에 넣어야 할 것 같다. 제일 앞에 어떻게?
+                        this.pendingTransactions.unshift(tx); // pendingTransactions에 넣어야 할 것 같다. 제일 앞에 어떻게 넣을까?
                     }
                 } 
                 }
             }
         
 
-        return transactions;
+        return this.pendingTransactions;
     }
 
     private reapplyTransaction(tx: SignedTransaction) {
@@ -202,7 +202,7 @@ class OptimisticRollup {
         // 배치 시작 시 초기 상태 루트 설정
         let previousStateRoot;
         try {
-            previousStateRoot = await this.l1Contract.getPreviousStateRoot(batchId);
+            previousStateRoot = await this.l1Contract.getPreviousStateRoot(batchId); // 잘 작동!
             console.log("Previous State Root:", previousStateRoot);
         } catch (error) {
             console.error("Error fetching Previous State Root:", error);
@@ -210,19 +210,26 @@ class OptimisticRollup {
         }
 
         this.setStateRoot(previousStateRoot);
+        console.log("Previous State Root set:", this.stateRoot);
         
         for (let i = 0; i < transactions.length; i++) {
             const tx = transactions[i];
-            console.log(`Processing transaction ${i}:`, tx);
+            console.log(`Processing transaction ${tx.hash}:`, tx);
 
             try {
+                ////const revertedState = this.stateService.revertToState(batch.batchIndex);
+                //console.log("revertedState : " , revertedState)
+                
+                //console.log("getSnapshotAtBatch : " , this.stateService.getSnapshotAtBatch(batch.batchIndex))
                 this.reapplyTransaction(tx);
-                const computedStateRoot = this.stateService.computeStateRoot();
-                console.log(`Computed State Root for transaction ${i}:`, computedStateRoot);
-        
+                
+                const computedStateRoot = this.stateService.computeStateRoot(); // 전체 acoount에 대한 stateRoot 검증이므로 다른 로직이 필요
+                console.log(`Computed State Root for transaction ${tx.hash}:`, computedStateRoot);
+                
                 // 예상 상태 루트와 비교
-                const expectedStateRoot = await this.db.get(`stateRoot:${tx.hash}`);
-                console.log(`Expected State Root for transaction ${i}:`, expectedStateRoot);
+                console.log("Expected State Root for transaction:", tx.hash);
+                const expectedStateRoot = await this.db.get(`stateRoot:${tx.hash}`); // 여기서는 첫 트랜잭션 하나에 대한 stateRoot불러와서 다르게 나옴
+                console.log(`Expected State Root for transaction ${tx.hash}:`, expectedStateRoot);
         
                 if (expectedStateRoot !== computedStateRoot) {
                     const leaves = transactions.map(tx => {
@@ -277,10 +284,7 @@ class OptimisticRollup {
         }
     
        await this.verifierContract.executeFullBatch(batchId, transactions, txHash);
-       
-    //    const batch = await this.l1Contract.getBatchByBatchId(batchId);
-
-        return ;
+       return ;
     }
 
     async setChallengePeriod(period: number) {
@@ -407,6 +411,8 @@ class OptimisticRollup {
 
     // pendingTransactions 배열에 트랜잭션 추가
     async addTransaction(tx: Transaction, signer: ethers.Signer): Promise<void> {
+        
+
         const signedTx = await this.transactionService.signTransaction(tx, signer);
         if (await this.transactionService.verifyTransaction(signedTx.signedTx, signedTx.sig)) {
             this.pendingTransactions.push(signedTx.signedTx);
@@ -498,58 +504,6 @@ class OptimisticRollup {
     deposit(address: string, amount: bigint): void {
         this.stateService.deposit(address, amount);
     }
-
-    // private async verifyBatch(batchId: string): Promise<void> {
-    //     const snapshotKey = `snapshot:${batchId}`;
-    //     const snapshot = JSON.parse(await this.db.get(snapshotKey));        
-    //     if (!snapshot) {
-    //         throw new Error(`Snapshot not found for batch ID: ${batchId}`);
-    //     }
-
-    //     const previousSnapshotKey = snapshot.previousSnapshotKey;
-    //     const previousSnapshot = previousSnapshotKey ? JSON.parse(await this.db.get(previousSnapshotKey)) : null;
-        
-    //     let stateRoot = previousSnapshot ? previousSnapshot.stateRoot : ethers.constants.HashZero;
-    //     const txLogs = [];
-    //     const stateRoots = [];
-
-    //     let currentBlockNumber = previousSnapshot ? previousSnapshot.blockNumber + 1 : 0;
-    //     while (currentBlockNumber <= snapshot.blockNumber) {
-    //         const blockData = this.blocks[currentBlockNumber];
-    //         for (const tx of blockData.transactions) {
-    //             const txLog = JSON.parse(await this.db.get(`txLog:${tx.hash}`));
-    //             txLogs.push(txLog);
-    //             const stateRoot = await this.db.get(`stateRoot:${tx.hash}`);
-    //             stateRoots.push(stateRoot);
-    //         }
-    //         currentBlockNumber++;
-    //     }
-
-    //     const leaves = txLogs.map(tx => ethers.utils.keccak256(ethers.utils.toUtf8Bytes(JSON.stringify(tx))));
-    //     const merkleTree = MerkleTree.buildMerkleTree(leaves);
-    //     const root = merkleTree[merkleTree.length - 1][0];
-
-    //     for (let i = 0; i < txLogs.length; i++) {
-    //         const txLog = txLogs[i];
-    //         const expectedStateRoot = stateRoots[i];
-
-    //         this.applyTransaction(txLog);
-    //         const computedStateRoot = this.computeStateRoot();
-    //         let previousStateRoot : string = '0x';
-    //         if (computedStateRoot !== expectedStateRoot) {
-    //             const proof = MerkleTree.generateMerkleProof(merkleTree, i);
-    //             await this.bondManagerContract.deposit();
-    //             await this.verifierContract.initiateChallenge(batchId, i, proof);
-
-    //             console.log(`Challenge submitted for batch ${batchId}, transaction index ${i}`);
-    //             return;
-    //         } else {
-    //             previousStateRoot = computedStateRoot;
-    //         }
-    //     }
-
-    //     console.log(`Batch ${batchId} verification successful`);
-    // }
 
     
 }

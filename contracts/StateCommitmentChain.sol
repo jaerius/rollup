@@ -22,7 +22,7 @@ contract StateCommitmentChain {
     event StateBatchAppended(uint256 indexed batchIndex, bytes batchData, bytes32 stateRoot, bytes32 transactionsRoot, address proposer, bytes32 batchId);
     event StateBatchFinalized(uint256 indexed batchIndex);
     event ChallengePeriodUpdated(uint256 newChallengePeriod);
-    event BatchInvalidated(uint256 indexed batchIndex);
+    event BatchInvalidated(uint256 indexed batchIndex, bytes32 txHash);
 
     function appendStateBatch(bytes calldata _calldata, bytes32 _stateRoot, bytes32 _transactionsRoot, address _proposer, bytes32 _batchId) public {
         // 원래 배치의 상태는 scc에, 배치 데이터는 ctc에 저장하려 했지만, 한 곳에 배치의 상태 & 데이터 저장
@@ -59,7 +59,7 @@ contract StateCommitmentChain {
         emit StateBatchFinalized(_batchIndex);
     }
     // 배치의 챌린지가 사실로 밝혀질 경우 배치 무효화를 추가
-    function invalidateBatch(uint256 _batchIndex) public {
+    function invalidateBatch(uint256 _batchIndex, bytes32 txHash) public {
         require(_batchIndex < batches.length, "Batch index out of bounds");
         require(!batches[_batchIndex].finalized, "Cannot invalidate finalized batch");
         require(batches[_batchIndex].valid, "Batch already invalidated");
@@ -77,7 +77,7 @@ contract StateCommitmentChain {
         // 상태 루트를 이전 유효한 배치의 상태 루트로 변경
         stateRoot = batches[latestValidBatch].stateRoot;
 
-        emit BatchInvalidated(_batchIndex);
+        emit BatchInvalidated(_batchIndex, txHash);
     }
 
     function getBatch(uint256 _index) public view returns (

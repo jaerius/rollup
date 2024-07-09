@@ -5,12 +5,13 @@ import { get } from 'http';
 import TransactionService from './services/TransactionService';
 import StateService from './services/StateService';
 import Level from 'level';
+export const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const ganachePrivateKeys = {
-    '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2': '0xfaa8c492b7fd21ed3e9a0e4f3a621bbe044f518e7867723432439015e918360c', // 여기에 실제 개인 키를 입력합니다.
-    '0x001E436e37973c207b14053d78897DaB17d7cc4d': '0x27b3b8bd057b6409219805199d3ee149c0cf57983fa5c7af720303c7e9bf34c0',
-    '0xD341949f9CDDc00953CF4E2050F380989d810CB4': '0x87373d62bac14d7f778aadaf90f1ab2c91540a84f7770b89e43b5f4d163cf654',
-    '0x12fb2d274742b3F274fe0D92cE6227C4bf60B944': '0x368d55f41d663943add2efb62be85d8986126312e913f293fdbc980f3324b25e'
+    '0x1fD45E37Aa9b1B18621A910e0e2BCdd3FCd4c3F8': '0xb27ce489c8268ed5b406cee761524a9e0725bd4c0cf36965aed6b0588cbbb5e0', // 여기에 실제 개인 키를 입력합니다.
+    '0xCa1fB9993215DCD9e6fDB042d5985f87F22CcbA4': '0x62d82ef4208c572860d2e5480454a72ea3b21dc32eebd3c1dde053c30e53f3ee',
+    '0xFEBBaD4c627aFAB2D717ed178d27D570FFD36C2a': '0x1d4f938a1ba1ab7d88fcbc44720771d998781f14edbbe0579695aee3c3edfb35',
+    '0xa9b543604704c19a5fBd726D1AF95D34Ea9F0A55': '0xb28284568c1fdc0369000e6e7c30e9b7cf73768881e4c86a1f918dec759b1725'
 };
 
 const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545');
@@ -68,7 +69,7 @@ async function main() {
     console.log('설정을 시작합니다...');
     const difficulty = 1;
     const provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545'); // 로컬 노드에 연결
-    const privateKey = '0x9bb48d1859388d71be20ac50349f8f211977a3fcdb03266f35827404efcfeb35'; // 테스트용 개인 키
+    const privateKey = '0xc73b85200708cef58456b9d668ad2fcfd8491cfd1fb13e470b040b58636b2829'; // 테스트용 개인 키
     console.log("getnetworkinfo",getNetworkInfo())
     const rollup = new OptimisticRollup(difficulty);
     const wallet = new ethers.Wallet(privateKey, provider);
@@ -93,8 +94,8 @@ async function main() {
     console.log('예제 트랜잭션 데이터를 준비합니다...');
     const transactions1: Transaction[] = [
         {
-            from: '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2',
-            to: '0x001E436e37973c207b14053d78897DaB17d7cc4d',
+            from: '0x1fD45E37Aa9b1B18621A910e0e2BCdd3FCd4c3F8',
+            to: '0xCa1fB9993215DCD9e6fDB042d5985f87F22CcbA4',
             amount: BigInt(10),
             fee: BigInt(1),
             nonce: BigInt(0),
@@ -105,8 +106,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0x001E436e37973c207b14053d78897DaB17d7cc4d',
-            to: '0xD341949f9CDDc00953CF4E2050F380989d810CB4',
+            from: '0xCa1fB9993215DCD9e6fDB042d5985f87F22CcbA4',
+            to: '0xFEBBaD4c627aFAB2D717ed178d27D570FFD36C2a',
             amount: BigInt(20),
             fee: BigInt(1),
             nonce: BigInt(1),
@@ -120,8 +121,8 @@ async function main() {
 
     const transactions2: Transaction[] = [
         {
-            from: '0xD341949f9CDDc00953CF4E2050F380989d810CB4',
-            to: '0x12fb2d274742b3F274fe0D92cE6227C4bf60B944',
+            from: '0x1fD45E37Aa9b1B18621A910e0e2BCdd3FCd4c3F8',
+            to: '0xFEBBaD4c627aFAB2D717ed178d27D570FFD36C2a',
             amount: BigInt(5),
             fee: BigInt(1),
             nonce: BigInt(2),
@@ -132,8 +133,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0xD341949f9CDDc00953CF4E2050F380989d810CB4',
-            to: '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2',
+            from: '0xFEBBaD4c627aFAB2D717ed178d27D570FFD36C2a',
+            to: '0x1fD45E37Aa9b1B18621A910e0e2BCdd3FCd4c3F8',
             amount: BigInt(15),
             fee: BigInt(1),
             nonce: BigInt(3),
@@ -147,8 +148,8 @@ async function main() {
 
     const transactions3: Transaction[] = [
         {
-            from: '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2',
-            to: '0xD341949f9CDDc00953CF4E2050F380989d810CB4',
+            from: '0x1fD45E37Aa9b1B18621A910e0e2BCdd3FCd4c3F8',
+            to: '0xFEBBaD4c627aFAB2D717ed178d27D570FFD36C2a',
             amount: BigInt(3),
             fee: BigInt(1),
             nonce: BigInt(4),
@@ -159,8 +160,8 @@ async function main() {
             hash: ''
         },
         {
-            from: '0xc281Bb9C950c65C7661c912E1DaC4Af38e7055C2',
-            to: '0x12fb2d274742b3F274fe0D92cE6227C4bf60B944',
+            from: '0x1fD45E37Aa9b1B18621A910e0e2BCdd3FCd4c3F8',
+            to: '0xa9b543604704c19a5fBd726D1AF95D34Ea9F0A55',
             amount: BigInt(10),
             fee: BigInt(1),
             nonce: BigInt(5),
@@ -203,27 +204,29 @@ async function main() {
     console.log('첫 번째 블록 생성 중...');
     rollup.pendingTransactions.push(...signedTransactions1);
     const batchId1 = await rollup.processBatch(proposers);
-    
+    //await waitForStateBatchAppended(rollup, batchId1);
 
     
     // 두 번째 배치
     console.log('두 번째 블록 생성 중...');
     rollup.pendingTransactions.push(...signedTransactions2);
     const batchId2 = await rollup.processBatch(proposers);
-    await rollup.verifyBatch(batchId1);
-    await waitForStateBatchAppended(rollup, batchId2);
+    
+   // await waitForStateBatchAppended(rollup, batchId2);
 
-    // 세 번째 배치
-    console.log('세 번째 블록 생성 중...');
-    rollup.pendingTransactions.push(...signedTransactions3);
-    await rollup.processBatch(proposers);
-    const batchId3 = await rollup.processBatch(proposers);
-    await waitForStateBatchAppended(rollup, batchId3);
+    // // 세 번째 배치
+    // console.log('세 번째 블록 생성 중...');
+    // rollup.pendingTransactions.push(...signedTransactions3);
+    // await rollup.processBatch(proposers);
+    // const batchId3 = await rollup.processBatch(proposers);
+    // await waitForStateBatchAppended(rollup, batchId3);
 
     
     //await rollup.verifyBatch(batchId1);
+    await wait(20000);
     await rollup.verifyBatch(batchId2);
-    await rollup.verifyBatch(batchId3);
+    // await rollup.verifyBatch(batchId2);
+    // await rollup.verifyBatch(batchId3);
 
 
     console.log('PoW 시뮬레이션 및 배치 제안 완료');
