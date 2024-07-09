@@ -59,16 +59,40 @@ class StateService {
         const snap1 = await this.db.put(`txLog:${tx.hash}`, JSON.stringify(txLog)); 
         const snap2 = await this.db.get(`txLog:${tx.hash}`);
         console.log("snap2", snap2)
-        const snap = await this.saveSnapshot(tx.hash, JSON.stringify(txLog) )
+        const snap = await this.saveSnapshot(tx.hash)
         console.log(snap, "snap")
         }
 
-        ///snap shot
-        async saveSnapshot(transactionIndex: string, snapshot: any): Promise<void> {
-            const key = `snapshot:${transactionIndex}`;
-            await this.db.put(key, snapshot);
-            console.log(`Saved snapshot at key: ${key}`);
-        }
+    //snap shot
+    async saveSnapshot(transactionIndex: string): Promise<void> {
+        
+        const snapshot = {
+            accounts: Array.from(this.accounts.entries()).map(([address, account]) => ({
+                address,
+                balance: account.balance.toString(),
+                nonce: account.nonce.toString()
+            })),
+            stateRoot: this.computeStateRoot()
+        };
+        const key = `snapshot:${transactionIndex}`;
+        await this.db.put(key, JSON.stringify(snapshot));
+        console.log(`Saved snapshot at key: ${key} : `, snapshot);
+    }
+
+    public async saveSnapshotForBatch(batchIndex: Number): Promise<void> {
+        
+        const snapshot = {
+            accounts: Array.from(this.accounts.entries()).map(([address, account]) => ({
+                address,
+                balance: account.balance.toString(),
+                nonce: account.nonce.toString()
+            })),
+            stateRoot: this.computeStateRoot()
+        };
+        const key = `snapshot:${batchIndex}`;
+        await this.db.put(key, JSON.stringify(snapshot));
+        console.log(`Saved snapshot at key: ${key} : `, snapshot);
+    }
 
     public computeStateRoot(): string {
         const leaves = Array.from(this.accounts.entries()).map(([address, account]) => {
@@ -89,15 +113,32 @@ class StateService {
 
     public async revertToState(batchIndex: number): Promise<void> {
         const snapshot = await this.getSnapshotAtBatch(batchIndex);
-        this.accounts = snapshot.accounts;
+        this.accounts = new Map(snapshot.accounts.map((account: any) => [account.address, { balance: BigInt(account.balance), nonce: BigInt(account.nonce) }]));
+        console.log(Array.from(this.accounts.entries()).map(([address, account]) => ({
+            address,
+            balance: account.balance.toString(),
+            nonce: account.nonce.toString()
+        })),)
     }
 
     public async getSnapshotAtBatch(batchIndex: number): Promise<any> {
-        const state = await this.db.get(`snapshot:${batchIndex}`);
+        const state = await this.db.get(`snapshot:${batchIndex -1}`);
+        console.log("state", state)
+
+        // state의 내용을 모든 account의 balance와 nonce로 구성된 배열로 변환
+        const parsedState = JSON.parse(state);
+
+
         return {
-            accounts: new Map(JSON.parse(state).accounts),
-            stateRoot: JSON.parse(state).stateRoot
+            accounts: parsedState.accounts.map((account: any) => ({
+                address: account.address,
+                balance: BigInt(account.balance),
+                nonce: BigInt(account.nonce)
+            })),
+            stateRoot: parsedState.stateRoot
         };
+       
+
     }
 
     public deposit(address: string, amount: bigint): void {

@@ -134,7 +134,7 @@ class OptimisticRollup {
         return this.pendingTransactions;
     }
 
-    private reapplyTransaction(tx: SignedTransaction) {
+    private async reapplyTransaction(tx: SignedTransaction) {
         // 트랜잭션을 재적용하여 상태를 업데이트하는 로직 구현
         const account = this.accounts.get(tx.from);
         if (account) {
@@ -169,24 +169,7 @@ class OptimisticRollup {
         this.stateRoot = this.stateService.computeStateRoot();
     }
 
-    // private async getSnapshotAtBatch(batchIndex: number): Promise<any> {
-    //     const state = await this.db.get(`snapshot:${batchIndex}`);
-    //     return {
-    //         accounts: new Map(JSON.parse(state).accounts),
-    //         stateRoot: JSON.parse(state).stateRoot
-    //     };
-    // }
-
-    // private async getLatestSnapshotInfo(): Promise<{ key: string; blockNumber: bigint }> {
-    //     if (!this.previousSnapshotKey) {
-    //         return { key: '', blockNumber: BigInt(0) };
-    //     }
-    //     const snapshotData = JSON.parse(await this.db.get(this.previousSnapshotKey));
-    //     return {
-    //         key: this.previousSnapshotKey,
-    //         blockNumber: BigInt(snapshotData.blockNumber)
-    //     };
-    // }
+    
 
     private setStateRoot(stateRoot: string) {
         this.stateRoot = stateRoot;
@@ -217,11 +200,10 @@ class OptimisticRollup {
             console.log(`Processing transaction ${tx.hash}:`, tx);
 
             try {
-                ////const revertedState = this.stateService.revertToState(batch.batchIndex);
-                //console.log("revertedState : " , revertedState)
-                
-                //console.log("getSnapshotAtBatch : " , this.stateService.getSnapshotAtBatch(batch.batchIndex))
-                this.reapplyTransaction(tx);
+                // state되돌려야 함
+                console.log("batchIndex:", Number(batch.batchIndex))
+                await this.stateService.revertToState(Number(batch.batchIndex - 1));
+                await this.reapplyTransaction(tx);
                 
                 const computedStateRoot = this.stateService.computeStateRoot(); // 전체 acoount에 대한 stateRoot 검증이므로 다른 로직이 필요
                 console.log(`Computed State Root for transaction ${tx.hash}:`, computedStateRoot);
@@ -375,17 +357,6 @@ class OptimisticRollup {
 
             // 스마트 컨트랙트에서 직접 처리할 수 있는 16진수 문자열로 변환
             const hexlifiedCalldata = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(batch.calldata));
-
-           
-            // const ctcGasEstimate = await this.ctcContract.estimateGas.appendTransactionBatch(hexlifiedCalldata);
-            // const ctcTx = await this.ctcContract.appendTransactionBatch(hexlifiedCalldata,{
-            //     gasLimit: ctcGasEstimate
-            // });
-            // await ctcTx.wait();
-            // console.log(`Transaction batch submitted to CTC`);
-            // this.ctcContract.on('TransactionBatchAppended', (hexlifiedCalldata) => {
-            //     console.log(`TransactionBatchAppended event detected: calldata = ${hexlifiedCalldata}`);
-            // });
             
             // 가스 추정을 사용하여 가스 한도 설정
             const sccGasEstimate = await this.l1Contract.estimateGas.appendStateBatch(hexlifiedCalldata, stateRoot, transactionRoot, batch.proposer, batch.batchId);
@@ -394,10 +365,15 @@ class OptimisticRollup {
             });
             await sccTx.wait();
             console.log(`State batch submitted with state root: ${stateRoot}`);
+
+
             // 이벤트 리스너 등록
             this.l1Contract.on('StateBatchAppended', (batchIndex, calldata, stateRoot, proposer, batchId) => {
                 console.log(`StateBatchAppended event detected: batchIndex = ${batchIndex}, calldata = ${calldata} stateRoot = ${stateRoot}, proposer = ${proposer}, batchId = ${batchId}`);
+                this.stateService.saveSnapshotForBatch(batchIndex)
             });
+
+            
 
         } catch (error) {
             console.error('Error submitting batch:', error);
@@ -412,7 +388,6 @@ class OptimisticRollup {
     // pendingTransactions 배열에 트랜잭션 추가
     async addTransaction(tx: Transaction, signer: ethers.Signer): Promise<void> {
         
-
         const signedTx = await this.transactionService.signTransaction(tx, signer);
         if (await this.transactionService.verifyTransaction(signedTx.signedTx, signedTx.sig)) {
             this.pendingTransactions.push(signedTx.signedTx);
