@@ -12,16 +12,16 @@ class MerkleTree {
 
             for (let i = 0; i < currentLevel.length; i += 2) {
                 if (i + 1 < currentLevel.length) {
-                    nextLevel.push(
-                        ethers.utils.keccak256(
-                            ethers.utils.solidityPack(
-                                ['bytes32', 'bytes32'],
-                                [currentLevel[i], currentLevel[i + 1]]
-                            )
-                        )
-                    );
+                  nextLevel.push(
+                    ethers.utils.keccak256(
+                      ethers.utils.solidityPack(
+                        ["bytes32", "bytes32"],
+                        [currentLevel[i], currentLevel[i + 1]]
+                      )
+                    )
+                  );
                 } else {
-                    nextLevel.push(currentLevel[i]);
+                  nextLevel.push(currentLevel[i]);
                 }
             }
             tree.push(nextLevel);

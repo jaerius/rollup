@@ -1,12 +1,12 @@
 export interface Batch {
-    proposer: string;
-    timestamp: number;
-    calldata: string;
-    batchId: string;
+  proposer: string;
+  timestamp: number;
+  calldata: string;
+  batchId: string;
 }
 
 export interface ctcBatch {
-    calldata: string;
-    startIndex: number;
-    endIndex: number;
+  calldata: string;
+  startIndex: number;
+  endIndex: number;
 }
