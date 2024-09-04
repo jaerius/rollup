@@ -1,5 +1,6 @@
 import { HardhatUserConfig } from 'hardhat/config';
-import '@nomiclabs/hardhat-ethers'; // ethers 플러그인 추가
+import '@nomiclabs/hardhat-ethers';
+import '@nomiclabs/hardhat-waffle';
 
 const config: HardhatUserConfig = {
   solidity: '0.8.19',

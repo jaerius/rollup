@@ -327,7 +327,7 @@ class OptimisticRollup {
     }
 
     await this.verifierContract.executeFullBatch(batchId, transactions, txHash);
-    return;
+    return true;
   }
 
   async setChallengePeriod(period: number) {
@@ -485,9 +485,9 @@ class OptimisticRollup {
       );
     } catch (error) {
       console.error('Error submitting batch:', error);
-      if (error.data && error.data.message) {
-        console.error('Revert reason:', error.data.message);
-      }
+      // if (error.data && error.data.message) {
+      //   console.error('Revert reason:', error.data.message);
+      // }
     }
   }
 

@@ -5,13 +5,16 @@
     "strict": true,
     "esModuleInterop": true,
     "outDir": "dist",
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "types": ["mocha", "node"],
+    "allowSyntheticDefaultImports": true
   },
   "include": [
     "./scripts",
     "./test",
     "./hardhat.config.ts",
-    "./contracts" // Solidity 파일들이 위치한 폴더 추가
+    "./contracts", // Solidity 파일들이 위치한 폴더 추가
+    "./typechain"
   ],
   "files": ["./hardhat.config.ts"]
 }
