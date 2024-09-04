@@ -1,7 +1,8 @@
 import { ethers } from 'ethers';
 import fs from 'fs';
 
-const abiPath = './build/contracts/StateCommitmentChain.json';
+const abiPath =
+  './artifacts/contracts/StateCommitmentChain.sol/StateCommitmentChain.json';
 const contractJson = JSON.parse(fs.readFileSync(abiPath, 'utf8'));
 const contractABI = contractJson.abi;
 const contractAddress = contractJson.networks['1720548607691'].address;
