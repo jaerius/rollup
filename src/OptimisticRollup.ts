@@ -1,27 +1,27 @@
-import { Level } from "level";
-import { ethers } from "ethers";
-import zlib from "zlib";
-import { promisify } from "util";
-import { Block, BlockData } from "./models/Block";
-import { Blockchain } from "./models/BlockChain";
-import POW from "./models/pow";
-import MerkleTree from "./utils/MerkleTree";
-import { Batch } from "./interfaces/Batch";
-import { ctcBatch } from "./interfaces/Batch";
-import { SignedTransaction, Transaction } from "./interfaces/Transaction";
-import contract from "./contracts/StateCommitmentChain";
-import FraudVerifierContract from "./contracts/FraudVerifier";
-import BondManagerContract from "./contracts/BondManager";
-import ctcContract from "./contracts/CanonicalTransactionChain";
+import { Level } from 'level';
+import { ethers } from 'ethers';
+import zlib from 'zlib';
+import { promisify } from 'util';
+import { Block, BlockData } from './models/Block';
+import { Blockchain } from './models/BlockChain';
+import POW from './models/pow';
+import MerkleTree from './utils/MerkleTree';
+import { Batch } from './interfaces/Batch';
+import { ctcBatch } from './interfaces/Batch';
+import { SignedTransaction, Transaction } from './interfaces/Transaction';
+import contract from './contractsInterface/StateCommitmentChain';
+import FraudVerifierContract from './contractsInterface/FraudVerifier';
+import BondManagerContract from './contractsInterface/BondManager';
+import ctcContract from './contractsInterface/CanonicalTransactionChain';
 import {
   RLP,
   keccak256,
   serializeTransaction,
   sha256,
   toUtf8Bytes,
-} from "ethers/lib/utils";
-import TransactionService from "./services/TransactionService";
-import StateService from "./services/StateService";
+} from 'ethers/lib/utils';
+import TransactionService from './services/TransactionService';
+import StateService from './services/StateService';
 
 class OptimisticRollup {
   once(
@@ -32,10 +32,10 @@ class OptimisticRollup {
       stateRoot: any,
       transactionsRoot: any,
       proposer: any,
-      appendedBatchId: any
-    ) => void
+      appendedBatchId: any,
+    ) => void,
   ) {
-    throw new Error("Method not implemented.");
+    throw new Error('Method not implemented.');
   }
   public pendingTransactions: SignedTransaction[] = [];
   private accounts: Map<string, { balance: bigint; nonce: bigint }> = new Map();
@@ -48,7 +48,7 @@ class OptimisticRollup {
   private pow: POW;
   private chain: Blockchain;
   public db: Level;
-  public previousSnapshotKey: string = "";
+  public previousSnapshotKey: string = '';
   private stateRoot: string;
   private transactionService: TransactionService;
   private stateService: StateService;
@@ -72,10 +72,10 @@ class OptimisticRollup {
         BigInt(0),
         Date.now(),
         [],
-        BigInt(0)
+        BigInt(0),
       ),
       nonce: BigInt(0),
-      batchData: "",
+      batchData: '',
     };
     const genesisBlock = new Block(genesisBlockData);
     this.blocks.push(genesisBlock);
@@ -84,7 +84,7 @@ class OptimisticRollup {
     this.chain = new Blockchain();
     this.chain.addBlock(genesisBlock);
     this.currentBlockNumber = BigInt(1);
-    this.db = new Level("./db", { valueEncoding: "json" });
+    this.db = new Level('./db', { valueEncoding: 'json' });
     this.stateRoot = ethers.constants.HashZero;
     this.transactionService = new TransactionService();
     this.stateService = new StateService(this.db);
@@ -95,11 +95,11 @@ class OptimisticRollup {
 
   private setupEventListeners() {
     this.l1Contract.on(
-      "BatchInvalidated",
+      'BatchInvalidated',
       async (batchIndex: number, txHash: string) => {
         this.invalidTransactionHashes.add(txHash);
         await this.handleBatchInvalidation(batchIndex);
-      }
+      },
     );
 
     // this.verifierContract.on('ChallengeInitiated', async (batchId: string, challenger: string, txHash: string) => {
@@ -108,16 +108,16 @@ class OptimisticRollup {
     // });
 
     this.verifierContract.on(
-      "ChallengeResolved",
+      'ChallengeResolved',
       async (batchId: string, success: boolean, proposer: string) => {
         console.log(
-          `Challenge resolved for batch ${batchId}. Success: ${success}`
+          `Challenge resolved for batch ${batchId}. Success: ${success}`,
         );
         if (!success) {
           const batch = await this.l1Contract.getBatchByBatchId(batchId);
           await this.handleBatchInvalidation(batch.batchIndex);
         }
-      }
+      },
     );
   }
 
@@ -134,7 +134,7 @@ class OptimisticRollup {
     const previousStateRoot = latestValidBatch.stateRoot;
 
     const transactionsToReapply = await this.getTransactionsAfterBatch(
-      latestValidBatch
+      latestValidBatch,
     );
     await this.stateService.revertToState(latestValidBatch);
     for (const tx of transactionsToReapply) {
@@ -144,7 +144,7 @@ class OptimisticRollup {
   }
 
   private async getTransactionsAfterBatch(
-    batchIndex: number
+    batchIndex: number,
   ): Promise<SignedTransaction[]> {
     // const transactions: SignedTransaction[] = [];
     const currentBatchCount = await this.l1Contract.getBatchCount();
@@ -177,12 +177,12 @@ class OptimisticRollup {
       // 음수 값이 발생하지 않도록 처리
       if (account.balance < 0) {
         throw new Error(
-          `Invalid balance for account ${tx.from}: ${account.balance}`
+          `Invalid balance for account ${tx.from}: ${account.balance}`,
         );
       }
       if (account.nonce < 0) {
         throw new Error(
-          `Invalid nonce for account ${tx.from}: ${account.nonce}`
+          `Invalid nonce for account ${tx.from}: ${account.nonce}`,
         );
       }
 
@@ -198,7 +198,7 @@ class OptimisticRollup {
     // 음수 값이 발생하지 않도록 처리
     if (recipient.balance < 0) {
       throw new Error(
-        `Invalid balance for account ${tx.to}: ${recipient.balance}`
+        `Invalid balance for account ${tx.to}: ${recipient.balance}`,
       );
     }
     if (recipient.nonce < 0) {
@@ -217,24 +217,24 @@ class OptimisticRollup {
 
   // verifier가 틀렸는지 안 틀렸는지 검증
   async verifyBatch(batchId: string): Promise<void> {
-    console.log("verifyBatch batchId:", batchId);
+    console.log('verifyBatch batchId:', batchId);
     const batch = await this.l1Contract.getBatchByBatchId(batchId);
-    console.log("verifyBatch batch:", batch);
+    console.log('verifyBatch batch:', batch);
     const transactions: SignedTransaction[] =
       await this.transactionService.decodeBatchData(batch.batchData);
-    console.log("verifyBatch transactions:", transactions);
+    console.log('verifyBatch transactions:', transactions);
     // 배치 시작 시 초기 상태 루트 설정
     let previousStateRoot;
     try {
       previousStateRoot = await this.l1Contract.getPreviousStateRoot(batchId); // 잘 작동!
-      console.log("Previous State Root:", previousStateRoot);
+      console.log('Previous State Root:', previousStateRoot);
     } catch (error) {
-      console.error("Error fetching Previous State Root:", error);
+      console.error('Error fetching Previous State Root:', error);
       return;
     }
 
     this.setStateRoot(previousStateRoot);
-    console.log("Previous State Root set:", this.stateRoot);
+    console.log('Previous State Root set:', this.stateRoot);
 
     for (let i = 0; i < transactions.length; i++) {
       const tx = transactions[i];
@@ -242,22 +242,22 @@ class OptimisticRollup {
 
       try {
         // state되돌려야 함
-        console.log("batchIndex:", Number(batch.batchIndex));
+        console.log('batchIndex:', Number(batch.batchIndex));
         await this.stateService.revertToState(Number(batch.batchIndex - 1));
         await this.reapplyTransaction(tx);
 
         const computedStateRoot = this.stateService.computeStateRoot(); // 전체 acoount에 대한 stateRoot 검증이므로 다른 로직이 필요
         console.log(
           `Computed State Root for transaction ${tx.hash}:`,
-          computedStateRoot
+          computedStateRoot,
         );
 
         // 예상 상태 루트와 비교
-        console.log("Expected State Root for transaction:", tx.hash);
+        console.log('Expected State Root for transaction:', tx.hash);
         const expectedStateRoot = await this.db.get(`stateRoot:${tx.hash}`); // 여기서는 첫 트랜잭션 하나에 대한 stateRoot불러와서 다르게 나옴
         console.log(
           `Expected State Root for transaction ${tx.hash}:`,
-          expectedStateRoot
+          expectedStateRoot,
         );
 
         if (expectedStateRoot !== computedStateRoot) {
@@ -294,35 +294,35 @@ class OptimisticRollup {
         return;
       }
     }
-    console.log("Batch verification successful");
+    console.log('Batch verification successful');
   }
 
   async challenge(
     batchId: string,
     transactionIndex: string,
-    proof: string[]
+    proof: string[],
   ): Promise<void> {
     console.log(
-      `Challenging batch ${batchId}, transaction ${transactionIndex} due to ${proof}`
+      `Challenging batch ${batchId}, transaction ${transactionIndex} due to ${proof}`,
     );
     await this.bondManagerContract.deposit({
-      value: ethers.utils.parseEther("1"),
+      value: ethers.utils.parseEther('1'),
     }); // 보증금 예치
     await this.verifierContract.initiateChallenge(
       batchId,
       transactionIndex,
-      proof
+      proof,
     ); // 챌린지 신청
   }
 
   async verifyChallenge(
     batchId: string,
     txHash: string,
-    transactions: SignedTransaction[]
+    transactions: SignedTransaction[],
   ): Promise<boolean> {
     const challenge = await this.verifierContract.challenges(batchId);
     if (challenge.resolved) {
-      console.log("Challenge already resolved");
+      console.log('Challenge already resolved');
       return false;
     }
 
@@ -334,9 +334,9 @@ class OptimisticRollup {
     try {
       const tx = await this.l1Contract.setChallengePeriod(period);
       await tx.wait();
-      console.log("Challenge period set successfully");
+      console.log('Challenge period set successfully');
     } catch (error) {
-      console.error("Error setting challenge period:", error);
+      console.error('Error setting challenge period:', error);
     }
   }
 
@@ -345,32 +345,32 @@ class OptimisticRollup {
   async processBatch(proposers: string[]): Promise<string> {
     // 1. 트랜잭션 실행
     this.executePendingTransactions();
-    console.log("execute transactions", this.pendingTransactions);
+    console.log('execute transactions', this.pendingTransactions);
     // 2. 상태 루트 계산 -> 이건 이제 배치의 상태 루트가 됨
     const stateRoot = this.stateService.computeStateRoot();
-    console.log("stateRoot", stateRoot);
+    console.log('stateRoot', stateRoot);
     // 트랜잭션 루트 생성
     const transactionRoot = this.computeTransactionRoot(
-      this.pendingTransactions
+      this.pendingTransactions,
     );
-    console.log("transactionRoot", transactionRoot);
+    console.log('transactionRoot', transactionRoot);
     // 3. 배치 생성
     const previousBlockHash =
       this.blocks.length > 0
         ? this.blocks[this.blocks.length - 1].blockHash
         : ethers.constants.HashZero;
     console.log(
-      "previousBlockHash before creating new block:",
-      previousBlockHash
+      'previousBlockHash before creating new block:',
+      previousBlockHash,
     );
     const timestamp = Date.now();
     const calldata = this.transactionService.encodeBatchData(
-      this.pendingTransactions
+      this.pendingTransactions,
     );
-    console.log("encoded calldata:", calldata);
+    console.log('encoded calldata:', calldata);
 
     const compressedCalldata = await this.gzipCompress(calldata);
-    console.log("compressedCalldata (Base64):", compressedCalldata);
+    console.log('compressedCalldata (Base64):', compressedCalldata);
     // 새로운 블록 생성
     const blockData: BlockData = {
       transactions: this.pendingTransactions,
@@ -378,21 +378,21 @@ class OptimisticRollup {
       blockNumber: this.currentBlockNumber,
       previousBlockHash,
       timestamp,
-      blockHash: "",
+      blockHash: '',
       nonce: BigInt(0),
       batchData: compressedCalldata.toString(),
     };
 
     const newBlock = new Block(blockData);
     const miningPromises = proposers.map((proposer) =>
-      this.pow.mine(newBlock, proposer)
+      this.pow.mine(newBlock, proposer),
     );
     // 가장 논스 값이 적게 든 사용자가 proposer가 됨
     const firstResult = await Promise.all(miningPromises);
     const bestResult = firstResult.reduce((prev, current) =>
-      prev.nonce < current.nonce ? prev : current
+      prev.nonce < current.nonce ? prev : current,
     );
-    console.log("bestResult", bestResult);
+    console.log('bestResult', bestResult);
     // 배치 데이터를 직렬화
     const batchId = ethers.utils.keccak256(ethers.utils.randomBytes(32));
     const batchData = {
@@ -410,10 +410,10 @@ class OptimisticRollup {
         blockNumber: this.currentBlockNumber.toString(),
         stateRoot,
         previousSnapshotKey: this.previousSnapshotKey,
-      })
+      }),
     );
     this.previousSnapshotKey = snapshotKey;
-    console.log("batchData", batchData);
+    console.log('batchData', batchData);
     // 블록 관련 연산 및 연결
     newBlock.blockHash = this.computeBlockHash(
       previousBlockHash,
@@ -421,14 +421,14 @@ class OptimisticRollup {
       newBlock.blockNumber,
       newBlock.timestamp,
       newBlock.transactions,
-      BigInt(bestResult.nonce)
+      BigInt(bestResult.nonce),
     );
     newBlock.nonce = BigInt(bestResult.nonce);
 
     this.blocks.push(newBlock);
     this.chain.addBlock(newBlock);
     this.currentBlockNumber = newBlock.blockNumber + BigInt(1);
-    console.log("newBlock before submit", newBlock);
+    console.log('newBlock before submit', newBlock);
     // 배치 제출
     await this.submitBatch(batchData, stateRoot, transactionRoot);
     this.pendingTransactions = [];
@@ -439,17 +439,17 @@ class OptimisticRollup {
   private async submitBatch(
     batch: Batch,
     stateRoot: string,
-    transactionRoot: string
+    transactionRoot: string,
   ): Promise<void> {
     try {
       const signer = this.l1Contract.signer;
       if (!signer) {
-        throw new Error("L1 Contract requires a signer");
+        throw new Error('L1 Contract requires a signer');
       }
 
       // 스마트 컨트랙트에서 직접 처리할 수 있는 16진수 문자열로 변환
       const hexlifiedCalldata = ethers.utils.hexlify(
-        ethers.utils.toUtf8Bytes(batch.calldata)
+        ethers.utils.toUtf8Bytes(batch.calldata),
       );
 
       // 가스 추정을 사용하여 가스 한도 설정
@@ -458,7 +458,7 @@ class OptimisticRollup {
         stateRoot,
         transactionRoot,
         batch.proposer,
-        batch.batchId
+        batch.batchId,
       );
       const sccTx = await this.l1Contract.appendStateBatch(
         hexlifiedCalldata,
@@ -468,25 +468,25 @@ class OptimisticRollup {
         batch.batchId,
         {
           gasLimit: sccGasEstimate,
-        }
+        },
       );
       await sccTx.wait();
       console.log(`State batch submitted with state root: ${stateRoot}`);
 
       // 이벤트 리스너 등록
       this.l1Contract.on(
-        "StateBatchAppended",
+        'StateBatchAppended',
         (batchIndex, calldata, stateRoot, proposer, batchId) => {
           console.log(
-            `StateBatchAppended event detected: batchIndex = ${batchIndex}, calldata = ${calldata} stateRoot = ${stateRoot}, proposer = ${proposer}, batchId = ${batchId}`
+            `StateBatchAppended event detected: batchIndex = ${batchIndex}, calldata = ${calldata} stateRoot = ${stateRoot}, proposer = ${proposer}, batchId = ${batchId}`,
           );
           this.stateService.saveSnapshotForBatch(batchIndex);
-        }
+        },
       );
     } catch (error) {
-      console.error("Error submitting batch:", error);
+      console.error('Error submitting batch:', error);
       if (error.data && error.data.message) {
-        console.error("Revert reason:", error.data.message);
+        console.error('Revert reason:', error.data.message);
       }
     }
   }
@@ -499,12 +499,12 @@ class OptimisticRollup {
     if (
       await this.transactionService.verifyTransaction(
         signedTx.signedTx,
-        signedTx.sig
+        signedTx.sig,
       )
     ) {
       this.pendingTransactions.push(signedTx.signedTx);
     } else {
-      throw new Error("Transaction verification failed");
+      throw new Error('Transaction verification failed');
     }
   }
 
@@ -521,17 +521,17 @@ class OptimisticRollup {
       ethers.utils.keccak256(
         ethers.utils.defaultAbiCoder.encode(
           [
-            "address",
-            "address",
-            "uint256",
-            "uint256",
-            "uint8",
-            "bytes32",
-            "bytes32",
+            'address',
+            'address',
+            'uint256',
+            'uint256',
+            'uint8',
+            'bytes32',
+            'bytes32',
           ],
-          [tx.from, tx.to, tx.amount, tx.nonce, tx.v, tx.r, tx.s]
-        )
-      )
+          [tx.from, tx.to, tx.amount, tx.nonce, tx.v, tx.r, tx.s],
+        ),
+      ),
     );
 
     const merkleTree = MerkleTree.buildMerkleTree(leaves);
@@ -544,7 +544,7 @@ class OptimisticRollup {
     blockNumber: bigint,
     timestamp: number,
     transactions: SignedTransaction[],
-    nonce: bigint
+    nonce: bigint,
   ): string {
     if (!ethers.utils.isHexString(previousBlockHash, 32)) {
       throw new Error(`Invalid previousBlockHash: ${previousBlockHash}`);
@@ -552,19 +552,19 @@ class OptimisticRollup {
     if (!ethers.utils.isHexString(stateRoot, 32)) {
       throw new Error(`Invalid stateRoot: ${stateRoot}`);
     }
-    if (typeof blockNumber !== "bigint") {
+    if (typeof blockNumber !== 'bigint') {
       throw new Error(`Invalid blockNumber: ${blockNumber}`);
     }
-    if (typeof timestamp !== "number") {
+    if (typeof timestamp !== 'number') {
       throw new Error(`Invalid timestamp: ${timestamp}`);
     }
-    if (typeof nonce !== "bigint") {
+    if (typeof nonce !== 'bigint') {
       throw new Error(`Invalid nonce: ${nonce}`);
     }
 
     const transactionsData = ethers.utils.defaultAbiCoder.encode(
       [
-        "tuple(address from, address to, uint256 amount, uint256 nonce, uint8 v, bytes32 r, bytes32 s)[]",
+        'tuple(address from, address to, uint256 amount, uint256 nonce, uint8 v, bytes32 r, bytes32 s)[]',
       ],
       [
         transactions.map((tx) => [
@@ -576,11 +576,11 @@ class OptimisticRollup {
           tx.r,
           tx.s,
         ]),
-      ]
+      ],
     );
 
     const blockData = ethers.utils.defaultAbiCoder.encode(
-      ["bytes32", "bytes32", "uint256", "uint256", "bytes", "uint256"],
+      ['bytes32', 'bytes32', 'uint256', 'uint256', 'bytes', 'uint256'],
       [
         previousBlockHash,
         stateRoot,
@@ -588,7 +588,7 @@ class OptimisticRollup {
         timestamp,
         transactionsData,
         nonce,
-      ]
+      ],
     );
 
     const blockHash = ethers.utils.keccak256(blockData);
@@ -602,9 +602,9 @@ class OptimisticRollup {
         if (error) {
           reject(error);
         } else {
-          console.log("gzipCompress result (Buffer):", result);
-          const base64Result = result.toString("base64");
-          console.log("gzipCompress result (Base64):", base64Result);
+          console.log('gzipCompress result (Buffer):', result);
+          const base64Result = result.toString('base64');
+          console.log('gzipCompress result (Base64):', base64Result);
           resolve(base64Result); // Base64 인코딩
         }
       });

@@ -11,7 +11,7 @@
     "./scripts",
     "./test",
     "./hardhat.config.ts",
-    "./src/contracts" // Solidity 파일들이 위치한 폴더 추가
+    "./contracts" // Solidity 파일들이 위치한 폴더 추가
   ],
   "files": ["./hardhat.config.ts"]
 }

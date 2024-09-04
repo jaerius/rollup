@@ -6,7 +6,7 @@
     "test": "ts-node src/OptimisticRollup.test.ts",
     "build": "tsc --build",
     "clean": "tsc --build --clean",
-    "deploy": "npx hardhat run scripts/deploy.js"
+    "deploy": "npx hardhat run scripts/deploy.ts"
   },
   "keywords": [],
   "author": "",
