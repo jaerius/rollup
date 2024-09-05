@@ -1,15 +1,17 @@
-import { SignedTransaction, Transaction } from "../interfaces/Transaction";
-import { ethers } from "ethers";
-import { RLP, keccak256 } from "ethers/lib/utils";
-import zlib from "zlib";
+import { SignedTransaction, Transaction } from '../interfaces/Transaction';
+import { ethers } from 'ethers';
+import { RLP, keccak256 } from 'ethers/lib/utils';
+import zlib from 'zlib';
+import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
+import { network } from 'hardhat';
 
 class TransactionService {
   public async signTransaction(
     tx: Transaction,
-    signer: ethers.Signer
+    signer: SignerWithAddress,
   ): Promise<{ signedTx: SignedTransaction; sig: any }> {
     const txData = {
-      nonce: Number(tx.nonce),
+      nonce: ethers.utils.hexlify(tx.nonce),
       gasPrice: ethers.utils.hexlify(tx.gasPrice),
       gasLimit: ethers.utils.hexlify(tx.gasLimit),
       to: tx.to,
@@ -18,42 +20,73 @@ class TransactionService {
       chainId: tx.chainId || 1,
     };
 
-    const signedTx = await signer.signTransaction(txData); //sign message말고, transactino으로 했더니 됨
-    const parsedTx = ethers.utils.parseTransaction(signedTx);
+    // const signedTx = await signer.signTransaction(txData); //sign message말고, transactino으로 했더니 됨
+    // const parsedTx = ethers.utils.parseTransaction(signedTx);
 
-    const messageHash = ethers.utils.keccak256(
-      ethers.utils.serializeTransaction(txData)
+    // const messageHash = ethers.utils.keccak256(
+    //   ethers.utils.serializeTransaction(txData),
+    // );
+
+    // let v = parsedTx.v!;
+    // if (v >= 37) {
+    //   v = v - (2 * txData.chainId + 8); // Adjust v value for EIP-155
+    // }
+
+    // Hardhat 설정에서 privateKey 가져오기
+    const signerAddress = await signer.getAddress();
+    const accounts = network.config.accounts as any[];
+    const account = accounts.find(
+      (acc) => ethers.utils.computeAddress(acc.privateKey) === signerAddress,
     );
 
-    let v = parsedTx.v!;
-    if (v >= 37) {
-      v = v - (2 * txData.chainId + 8); // Adjust v value for EIP-155
+    if (!account) {
+      throw new Error('Signer not found in Hardhat config');
     }
 
-    console.log("서명된 트랜잭션 데이터:", txData);
+    const rlpEncoded = ethers.utils.RLP.encode([
+      txData.nonce,
+      txData.gasPrice,
+      txData.gasLimit,
+      txData.to,
+      txData.value,
+      txData.data,
+      ethers.utils.hexlify(txData.chainId),
+      '0x',
+      '0x',
+    ]);
+
+    // 인코딩된 데이터의 Keccak256 해시 계산
+    const messageHash = ethers.utils.keccak256(rlpEncoded);
+
+    // 메시지 해시에 서명
+    const signingKey = new ethers.utils.SigningKey(account.privateKey);
+    const signedData = signingKey.signDigest(messageHash);
+
+    console.log('서명된 트랜잭션 데이터:', txData);
+
+    // EIP-155에 따라 v 값 조정
+    const v = ethers.BigNumber.from(signedData.v).add(txData.chainId * 2 + 8);
+
+    console.log('서명된 트랜잭션 데이터:', txData);
 
     return {
       signedTx: {
         ...tx,
-        v: v,
-        r: parsedTx.r!,
-        s: parsedTx.s!,
+        v: v.toNumber(),
+        r: signedData.r,
+        s: signedData.s,
         hash: messageHash,
       },
-      sig: {
-        v: v,
-        r: parsedTx.r!,
-        s: parsedTx.s!,
-      },
+      sig: ethers.utils.joinSignature(signedData),
     };
   }
 
   public async verifyTransaction(
     tx: SignedTransaction,
-    sig: any
+    sig: string,
   ): Promise<boolean> {
     const txData = {
-      nonce: Number(tx.nonce),
+      nonce: ethers.utils.hexlify(tx.nonce),
       gasPrice: ethers.utils.hexlify(tx.gasPrice),
       gasLimit: ethers.utils.hexlify(tx.gasLimit),
       to: tx.to,
@@ -62,68 +95,84 @@ class TransactionService {
       chainId: tx.chainId || 1,
     };
 
-    const serializedTx = ethers.utils.serializeTransaction({
-      nonce: txData.nonce,
-      gasPrice: txData.gasPrice,
-      gasLimit: txData.gasLimit,
-      to: txData.to,
-      value: txData.value,
-      data: txData.data,
-      chainId: txData.chainId,
-    });
-    const messageHash = ethers.utils.keccak256(serializedTx);
+    const rlpEncoded = ethers.utils.RLP.encode([
+      txData.nonce,
+      txData.gasPrice,
+      txData.gasLimit,
+      txData.to,
+      txData.value,
+      txData.data,
+      ethers.utils.hexlify(txData.chainId),
+      '0x',
+      '0x',
+    ]);
 
-    let v = sig.v;
-    if (v >= 37) {
-      v = v - (2 * txData.chainId + 8); // Adjust v value for EIP-155
+    const messageHash = ethers.utils.keccak256(rlpEncoded);
+
+    console.log('검증된 트랜잭션 데이터:', txData);
+
+    const recoveredAddress = ethers.utils.recoverAddress(messageHash, sig);
+
+    if (tx.hash === messageHash) {
+      console.log('message is not forged');
     }
 
-    console.log("검증된 트랜잭션 데이터:", txData);
+    console.log('Recovered address:', recoveredAddress);
+    console.log('Original from address:', tx.from);
 
-    const recoveredAddress = ethers.utils.recoverAddress(messageHash, {
-      v,
-      r: sig.r,
-      s: sig.s,
-    });
-
-    // 메시지는 위조되지 않았나? 검증
-    if (tx.hash == messageHash) {
-      console.log("message is not forged");
-    }
-
-    console.log("Recovered address:", recoveredAddress); // 보낸 사람이 정말 서명한 사람인가? 검증
-    console.log("Original from address:", tx.from);
-
-    // 서명자 일치 확인 및 메시지 위조 여부 모두 담은 결과 반환해야함
     return recoveredAddress.toLowerCase() === tx.from.toLowerCase();
+
+    // let v = sig.v;
+    // if (v >= 37) {
+    //   v = v - (2 * txData.chainId + 8); // Adjust v value for EIP-155
+    // }
+
+    // console.log('검증된 트랜잭션 데이터:', txData);
+
+    // const recoveredAddress = ethers.utils.recoverAddress(messageHash, {
+    //   v,
+    //   r: sig.r,
+    //   s: sig.s,
+    // });
+
+    // // 메시지는 위조되지 않았나? 검증
+    // if (tx.hash == messageHash) {
+    //   console.log('message is not forged');
+    // }
+
+    // console.log('Recovered address:', recoveredAddress); // 보낸 사람이 정말 서명한 사람인가? 검증
+    // console.log('Original from address:', tx.from);
+
+    // // 서명자 일치 확인 및 메시지 위조 여부 모두 담은 결과 반환해야함
+    // return recoveredAddress.toLowerCase() === tx.from.toLowerCase();
   }
 
   public encodeBatchData(batch: SignedTransaction[]): string {
     const encodedTx = batch.map((tx) => {
       if (tx.amount < 0 || tx.nonce < 0) {
         throw new Error(
-          `Invalid transaction: amount or nonce is negative. Amount: ${tx.amount}, Nonce: ${tx.nonce}`
+          `Invalid transaction: amount or nonce is negative. Amount: ${tx.amount}, Nonce: ${tx.nonce}`,
         );
       }
 
       // BigInt 값을 바이트 배열로 변환
       const amountBytes = ethers.utils.arrayify(
-        ethers.BigNumber.from(tx.amount.toString())
+        ethers.BigNumber.from(tx.amount.toString()),
       );
       const nonceBytes = ethers.utils.arrayify(
-        ethers.BigNumber.from(tx.nonce.toString())
+        ethers.BigNumber.from(tx.nonce.toString()),
       );
       const feeBytes = ethers.utils.arrayify(
-        ethers.BigNumber.from(tx.fee.toString())
+        ethers.BigNumber.from(tx.fee.toString()),
       );
       const gasPriceBytes = ethers.utils.arrayify(
-        ethers.BigNumber.from(tx.gasPrice.toString())
+        ethers.BigNumber.from(tx.gasPrice.toString()),
       );
       const gasLimitBytes = ethers.utils.arrayify(
-        ethers.BigNumber.from(tx.gasLimit.toString())
+        ethers.BigNumber.from(tx.gasLimit.toString()),
       );
       const chainIdBytes = ethers.utils.arrayify(
-        ethers.BigNumber.from(tx.chainId)
+        ethers.BigNumber.from(tx.chainId),
       );
       const v = ethers.utils.arrayify(ethers.BigNumber.from(tx.v));
 
@@ -149,47 +198,47 @@ class TransactionService {
   }
 
   public async decodeBatchData(
-    compressedData: string
+    compressedData: string,
   ): Promise<SignedTransaction[]> {
     // Hex 디코딩
     const hexDecodedData = ethers.utils.arrayify(compressedData);
-    console.log("Hex decoded data:", hexDecodedData);
+    console.log('Hex decoded data:', hexDecodedData);
 
     // UTF-8 바이트 배열로 변환
     const utf8Data = ethers.utils.toUtf8String(hexDecodedData);
-    console.log("UTF-8 data:", utf8Data);
+    console.log('UTF-8 data:', utf8Data);
 
     // Base64 디코딩
-    const base64DecodedData = Buffer.from(utf8Data, "base64");
-    console.log("Base64 decoded data:", base64DecodedData);
+    const base64DecodedData = Buffer.from(utf8Data, 'base64');
+    console.log('Base64 decoded data:', base64DecodedData);
 
     try {
       const decompressedData = await new Promise<Buffer>((resolve, reject) => {
         zlib.gunzip(base64DecodedData, (error, result) => {
           if (error) {
-            console.error("Gunzip error:", error);
+            console.error('Gunzip error:', error);
             reject(error);
           } else {
-            console.log("gunzip result (Buffer):", result);
+            console.log('gunzip result (Buffer):', result);
             resolve(result);
           }
         });
       });
 
-      const rlpEncodedBatch = decompressedData.toString("utf-8");
-      console.log("RLP encoded batch:", rlpEncodedBatch);
+      const rlpEncodedBatch = decompressedData.toString('utf-8');
+      console.log('RLP encoded batch:', rlpEncodedBatch);
 
       // 첫 번째 RLP 디코딩: 트랜잭션 목록 추출
       const decodedBatch = ethers.utils.RLP.decode(rlpEncodedBatch);
 
       // 트랜잭션 목록에서 각각의 트랜잭션을 다시 디코딩
       const transactions: SignedTransaction[] = (decodedBatch as string[]).map(
-        this.decodeTransaction
+        this.decodeTransaction,
       );
 
       return transactions;
     } catch (err) {
-      console.error("Decompression error:", err);
+      console.error('Decompression error:', err);
       throw err;
     }
   }
@@ -211,7 +260,7 @@ class TransactionService {
       r: decoded[9],
       s: decoded[10],
       data: decoded[11],
-      hash: "",
+      hash: '',
     };
 
     // 서명 전 필드만 포함한 트랜잭션 데이터 객체
@@ -227,11 +276,11 @@ class TransactionService {
 
     // 트랜잭션 직렬화
     const serializedTx = ethers.utils.serializeTransaction(txData);
-    console.log("Serialized transaction:", serializedTx);
+    console.log('Serialized transaction:', serializedTx);
 
     // 트랜잭션 해시 계산
     tx.hash = ethers.utils.keccak256(serializedTx);
-    console.log("Transaction hash:", tx.hash);
+    console.log('Transaction hash:', tx.hash);
 
     return tx;
   }

@@ -2,8 +2,9 @@
   "name": "rollup",
   "version": "1.0.0",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
-    "test": "ts-node test/OptimisticRollup.test.ts",
+    "test": "mocha -r ts-node/register test/**/*.test.ts",
     "build": "tsc --build",
     "clean": "tsc --build --clean",
     "deploy": "npx hardhat run scripts/deploy.ts"
@@ -34,7 +35,7 @@
     "@types/mocha": "^10.0.7",
     "@types/node": "^20.14.8",
     "@types/web3": "^1.2.2",
-    "chai": "^5.1.1",
+    "chai": "^4.3.7",
     "ethers": "^5.7.2",
     "hardhat": "^2.22.10",
     "mocha": "^10.5.1",

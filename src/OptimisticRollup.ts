@@ -1,5 +1,5 @@
 import { Level } from 'level';
-import { ethers } from 'ethers';
+import { ethers, providers } from 'ethers';
 import zlib from 'zlib';
 import { promisify } from 'util';
 import { Block, BlockData } from './models/Block';
@@ -9,10 +9,6 @@ import MerkleTree from './utils/MerkleTree';
 import { Batch } from './interfaces/Batch';
 import { ctcBatch } from './interfaces/Batch';
 import { SignedTransaction, Transaction } from './interfaces/Transaction';
-import contract from './contractsInterface/StateCommitmentChain';
-import FraudVerifierContract from './contractsInterface/FraudVerifier';
-import BondManagerContract from './contractsInterface/BondManager';
-import ctcContract from './contractsInterface/CanonicalTransactionChain';
 import {
   RLP,
   keccak256,
@@ -22,6 +18,12 @@ import {
 } from 'ethers/lib/utils';
 import TransactionService from './services/TransactionService';
 import StateService from './services/StateService';
+import { getContractAddress } from '../hardhat.config';
+import sccABI from '../artifacts/src/contracts/StateCommitmentChain.sol/StateCommitmentChain.json';
+import FraudVerifierABI from '../artifacts/src/contracts/FraudVerifier.sol/FraudVerifier.json';
+import BondManagerABI from '../artifacts/src/contracts/BondManager.sol/BondManager.json';
+import ctcABI from '../artifacts/src/contracts/CanonicalTransactionChain.sol/CanonicalTransactionChain.json';
+import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 
 class OptimisticRollup {
   once(
@@ -39,7 +41,7 @@ class OptimisticRollup {
   }
   public pendingTransactions: SignedTransaction[] = [];
   private accounts: Map<string, { balance: bigint; nonce: bigint }> = new Map();
-  public l1Contract: ethers.Contract;
+  public sccContract: ethers.Contract;
   public verifierContract: ethers.Contract;
   public bondManagerContract: ethers.Contract;
   public ctcContract: ethers.Contract;
@@ -55,10 +57,26 @@ class OptimisticRollup {
   private invalidTransactionHashes: Set<string> = new Set();
 
   constructor(difficulty: number) {
-    this.l1Contract = contract;
-    this.verifierContract = FraudVerifierContract;
-    this.bondManagerContract = BondManagerContract;
-    this.ctcContract = ctcContract;
+    const provider = new providers.JsonRpcProvider('http://localhost:8545');
+
+    const sccAddress = getContractAddress('StateCommitmentChain');
+    const verifierAddress = getContractAddress('FraudVerifier');
+    const bondManagerAddress = getContractAddress('BondManager');
+    const ctcAddress = getContractAddress('CanonicalTransactionChain');
+
+    // 컨트랙트 인스턴스 생성
+    this.sccContract = new ethers.Contract(sccAddress, sccABI.abi, provider);
+    this.verifierContract = new ethers.Contract(
+      verifierAddress,
+      FraudVerifierABI.abi,
+      provider,
+    );
+    this.bondManagerContract = new ethers.Contract(
+      bondManagerAddress,
+      BondManagerABI.abi,
+      provider,
+    );
+    this.ctcContract = new ethers.Contract(ctcAddress, ctcABI.abi, provider);
 
     const genesisBlockData: BlockData = {
       transactions: [],
@@ -94,7 +112,7 @@ class OptimisticRollup {
   // challenge, rollback 관련 함수들 작업 필요
 
   private setupEventListeners() {
-    this.l1Contract.on(
+    this.sccContract.on(
       'BatchInvalidated',
       async (batchIndex: number, txHash: string) => {
         this.invalidTransactionHashes.add(txHash);
@@ -114,7 +132,7 @@ class OptimisticRollup {
           `Challenge resolved for batch ${batchId}. Success: ${success}`,
         );
         if (!success) {
-          const batch = await this.l1Contract.getBatchByBatchId(batchId);
+          const batch = await this.sccContract.getBatchByBatchId(batchId);
           await this.handleBatchInvalidation(batch.batchIndex);
         }
       },
@@ -122,7 +140,7 @@ class OptimisticRollup {
   }
 
   private async handleBatchInvalidation(invalidatedBatchIndex: number) {
-    const latestValidBatch = await this.l1Contract.getLatestValidBatch();
+    const latestValidBatch = await this.sccContract.getLatestValidBatch();
 
     // 여기에서 LastestValidBatch의 previousState를 알아야함
     // 다시 그 previousState를 가지고 invalidate trnasaction을 제외한 배치를 다시 실행해야함
@@ -147,10 +165,10 @@ class OptimisticRollup {
     batchIndex: number,
   ): Promise<SignedTransaction[]> {
     // const transactions: SignedTransaction[] = [];
-    const currentBatchCount = await this.l1Contract.getBatchCount();
+    const currentBatchCount = await this.sccContract.getBatchCount();
 
     for (let i = batchIndex; i < currentBatchCount; i++) {
-      const batchData = await this.l1Contract.getBatch(i);
+      const batchData = await this.sccContract.getBatch(i);
       if (!batchData.valid) {
         // 배치가 유효하지 않으면서
         const decodedTransactions =
@@ -218,7 +236,7 @@ class OptimisticRollup {
   // verifier가 틀렸는지 안 틀렸는지 검증
   async verifyBatch(batchId: string): Promise<void> {
     console.log('verifyBatch batchId:', batchId);
-    const batch = await this.l1Contract.getBatchByBatchId(batchId);
+    const batch = await this.sccContract.getBatchByBatchId(batchId);
     console.log('verifyBatch batch:', batch);
     const transactions: SignedTransaction[] =
       await this.transactionService.decodeBatchData(batch.batchData);
@@ -226,7 +244,7 @@ class OptimisticRollup {
     // 배치 시작 시 초기 상태 루트 설정
     let previousStateRoot;
     try {
-      previousStateRoot = await this.l1Contract.getPreviousStateRoot(batchId); // 잘 작동!
+      previousStateRoot = await this.sccContract.getPreviousStateRoot(batchId); // 잘 작동!
       console.log('Previous State Root:', previousStateRoot);
     } catch (error) {
       console.error('Error fetching Previous State Root:', error);
@@ -332,7 +350,7 @@ class OptimisticRollup {
 
   async setChallengePeriod(period: number) {
     try {
-      const tx = await this.l1Contract.setChallengePeriod(period);
+      const tx = await this.sccContract.setChallengePeriod(period);
       await tx.wait();
       console.log('Challenge period set successfully');
     } catch (error) {
@@ -442,7 +460,7 @@ class OptimisticRollup {
     transactionRoot: string,
   ): Promise<void> {
     try {
-      const signer = this.l1Contract.signer;
+      const signer = this.sccContract.signer;
       if (!signer) {
         throw new Error('L1 Contract requires a signer');
       }
@@ -453,14 +471,15 @@ class OptimisticRollup {
       );
 
       // 가스 추정을 사용하여 가스 한도 설정
-      const sccGasEstimate = await this.l1Contract.estimateGas.appendStateBatch(
-        hexlifiedCalldata,
-        stateRoot,
-        transactionRoot,
-        batch.proposer,
-        batch.batchId,
-      );
-      const sccTx = await this.l1Contract.appendStateBatch(
+      const sccGasEstimate =
+        await this.sccContract.estimateGas.appendStateBatch(
+          hexlifiedCalldata,
+          stateRoot,
+          transactionRoot,
+          batch.proposer,
+          batch.batchId,
+        );
+      const sccTx = await this.sccContract.appendStateBatch(
         hexlifiedCalldata,
         stateRoot,
         transactionRoot,
@@ -474,7 +493,7 @@ class OptimisticRollup {
       console.log(`State batch submitted with state root: ${stateRoot}`);
 
       // 이벤트 리스너 등록
-      this.l1Contract.on(
+      this.sccContract.on(
         'StateBatchAppended',
         (batchIndex, calldata, stateRoot, proposer, batchId) => {
           console.log(
@@ -494,7 +513,10 @@ class OptimisticRollup {
   // 헬퍼 함수들
 
   // pendingTransactions 배열에 트랜잭션 추가
-  async addTransaction(tx: Transaction, signer: ethers.Signer): Promise<void> {
+  async addTransaction(
+    tx: Transaction,
+    signer: SignerWithAddress,
+  ): Promise<void> {
     const signedTx = await this.transactionService.signTransaction(tx, signer);
     if (
       await this.transactionService.verifyTransaction(

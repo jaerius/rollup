@@ -3,9 +3,8 @@ import type { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import OptimisticRollup from '../src/OptimisticRollup';
 import { Transaction, SignedTransaction } from '../src/interfaces/Transaction';
 import TransactionService from '../src/services/TransactionService';
-
-const chai = require('chai');
-const { expect } = chai;
+import { expect } from 'chai';
+import 'mocha';
 
 describe('Optimistic Rollup Tests', function () {
   let accounts: SignerWithAddress[];
@@ -135,7 +134,7 @@ describe('Optimistic Rollup Tests', function () {
     const batchId = await rollup.processBatch(proposers);
     expect(batchId).to.be.a('string', 'Batch processing failed');
 
-    await new Promise((resolve) => setTimeout(resolve, 20000)); // wait
+    await new Promise((resolve) => setTimeout(resolve, 50000)); // wait
     const isBatchValid = await rollup.verifyBatch(batchId);
     expect(isBatchValid).to.be.true;
   });
