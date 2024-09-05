@@ -57,7 +57,8 @@ class OptimisticRollup {
   private invalidTransactionHashes: Set<string> = new Set();
 
   constructor(difficulty: number) {
-    const provider = new providers.JsonRpcProvider('http://localhost:8545');
+    const provider = new providers.JsonRpcProvider('http://127.0.0.1:8545');
+    const signer = provider.getSigner();
 
     const sccAddress = getContractAddress('StateCommitmentChain');
     const verifierAddress = getContractAddress('FraudVerifier');
@@ -65,7 +66,7 @@ class OptimisticRollup {
     const ctcAddress = getContractAddress('CanonicalTransactionChain');
 
     // 컨트랙트 인스턴스 생성
-    this.sccContract = new ethers.Contract(sccAddress, sccABI.abi, provider);
+    this.sccContract = new ethers.Contract(sccAddress, sccABI.abi, signer);
     this.verifierContract = new ethers.Contract(
       verifierAddress,
       FraudVerifierABI.abi,
@@ -74,9 +75,9 @@ class OptimisticRollup {
     this.bondManagerContract = new ethers.Contract(
       bondManagerAddress,
       BondManagerABI.abi,
-      provider,
+      signer,
     );
-    this.ctcContract = new ethers.Contract(ctcAddress, ctcABI.abi, provider);
+    this.ctcContract = new ethers.Contract(ctcAddress, ctcABI.abi, signer);
 
     const genesisBlockData: BlockData = {
       transactions: [],
@@ -460,10 +461,10 @@ class OptimisticRollup {
     transactionRoot: string,
   ): Promise<void> {
     try {
-      const signer = this.sccContract.signer;
-      if (!signer) {
-        throw new Error('L1 Contract requires a signer');
-      }
+      // const signer = this.sccContract.signer;
+      // if (!signer) {
+      //   throw new Error('L1 Contract requires a signer');
+      // }
 
       // 스마트 컨트랙트에서 직접 처리할 수 있는 16진수 문자열로 변환
       const hexlifiedCalldata = ethers.utils.hexlify(

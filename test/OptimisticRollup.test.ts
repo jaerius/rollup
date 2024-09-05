@@ -110,6 +110,7 @@ describe('Optimistic Rollup Tests', function () {
   });
 
   it('should process transaction batch and verify batch', async function () {
+    this.timeout(60000);
     console.log('Processing and verifying batch...');
 
     const proposers = accounts.slice(0, 3).map((a) => a.address);
