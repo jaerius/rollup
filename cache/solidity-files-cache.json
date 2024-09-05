@@ -1,0 +1,149 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "/Users/jaewon/coding/rollup/src/contracts/BondManager.sol": {
+      "lastModificationDate": 1721353446794,
+      "contentHash": "d3550f54dae9e9ab7b420527320fec82",
+      "sourceName": "src/contracts/BondManager.sol",
+      "solcConfig": {
+        "version": "0.8.19",
+        "settings": {
+          "optimizer": {
+            "enabled": false,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        ">=0.4.22 <0.9.0"
+      ],
+      "artifacts": [
+        "BondManager"
+      ]
+    },
+    "/Users/jaewon/coding/rollup/src/contracts/FraudVerifier.sol": {
+      "lastModificationDate": 1725350512223,
+      "contentHash": "b7f6ee4e1268520d7bb42b14e356303d",
+      "sourceName": "src/contracts/FraudVerifier.sol",
+      "solcConfig": {
+        "version": "0.8.19",
+        "settings": {
+          "optimizer": {
+            "enabled": false,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./StateCommitmentChain.sol",
+        "./CanonicalTransactionChain.sol",
+        "./BondManager.sol"
+      ],
+      "versionPragmas": [
+        ">=0.4.22 <0.9.0"
+      ],
+      "artifacts": [
+        "FraudVerifier"
+      ]
+    },
+    "/Users/jaewon/coding/rollup/src/contracts/StateCommitmentChain.sol": {
+      "lastModificationDate": 1725350512223,
+      "contentHash": "26c6a3fa59afb30b7ff71ee3f6c8e8f3",
+      "sourceName": "src/contracts/StateCommitmentChain.sol",
+      "solcConfig": {
+        "version": "0.8.19",
+        "settings": {
+          "optimizer": {
+            "enabled": false,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        ">=0.4.22 <0.9.0"
+      ],
+      "artifacts": [
+        "StateCommitmentChain"
+      ]
+    },
+    "/Users/jaewon/coding/rollup/src/contracts/CanonicalTransactionChain.sol": {
+      "lastModificationDate": 1725350512223,
+      "contentHash": "66367803cdf9d08dc9091b54dd9558ba",
+      "sourceName": "src/contracts/CanonicalTransactionChain.sol",
+      "solcConfig": {
+        "version": "0.8.19",
+        "settings": {
+          "optimizer": {
+            "enabled": false,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        ">=0.4.22 <0.9.0"
+      ],
+      "artifacts": [
+        "CanonicalTransactionChain"
+      ]
+    }
+  }
+}
